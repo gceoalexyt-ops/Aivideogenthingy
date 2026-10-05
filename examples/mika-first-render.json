@@ -1,0 +1,17 @@
+{
+  "scene": "she sips her coffee, smiles warmly and turns toward the camera",
+  "prompt": "mksrn woman, she sips her coffee, smiles warmly and turns toward the camera",
+  "seed": 42,
+  "base": "models/Wan2.2-TI2V-5B-Diffusers",
+  "lora": null,
+  "image": "private/profile.jpg",
+  "seconds": 2848.5,
+  "width": 416,
+  "height": 736,
+  "num_frames": 49,
+  "fps": 24,
+  "steps": 30,
+  "guidance": 5.0,
+  "flow_shift": 5.0,
+  "lora_scale": 1.0
+}
