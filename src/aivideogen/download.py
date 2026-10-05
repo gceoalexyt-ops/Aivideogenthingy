@@ -8,8 +8,10 @@ in per-tensor-scaled fp8 (as ComfyUI ships it). Wan 2.2 5B then takes ~19 GB on 
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import struct
 from collections.abc import Callable
 from pathlib import Path
 
@@ -25,45 +27,79 @@ KNOWN_MODELS = {
 SKIP_SUFFIXES = (".md", ".png", ".jpg", ".jpeg", ".gif", ".mp4", ".pth", ".bin", ".pt", ".gitattributes")
 
 
+_DTYPE_NAMES = {
+    torch.float64: "F64",
+    torch.float32: "F32",
+    torch.float16: "F16",
+    torch.bfloat16: "BF16",
+    torch.float8_e4m3fn: "F8_E4M3",
+    torch.int64: "I64",
+    torch.int32: "I32",
+    torch.int16: "I16",
+    torch.int8: "I8",
+    torch.uint8: "U8",
+    torch.bool: "BOOL",
+}
+_DTYPES = {name: dtype for dtype, name in _DTYPE_NAMES.items()}
+Convert = Callable[[str, torch.Tensor], dict[str, torch.Tensor]]
+
+
+def _rewrite(path: Path, convert: Convert) -> None:
+    """Rewrite a safetensors file through ``convert(key, tensor) -> {key: tensor}``, one tensor at a time.
+
+    Memory stays at about one tensor (not the whole multi-GB file). The header is planned first by running
+    ``convert`` on shape-only meta tensors, then the data is streamed in the same order.
+    """
+    from safetensors import safe_open
+
+    tmp = path.with_name(path.name + ".tmp")
+    with safe_open(str(path), "pt") as f, open(tmp, "wb") as out:
+        keys = list(f.keys())
+        header, offset = {}, 0
+        for key in keys:
+            info = f.get_slice(key)
+            shape_only = torch.empty(info.get_shape(), dtype=_DTYPES[info.get_dtype()], device="meta")
+            for name, tensor in convert(key, shape_only).items():
+                size = tensor.numel() * tensor.element_size()
+                header[name] = {
+                    "dtype": _DTYPE_NAMES[tensor.dtype],
+                    "shape": list(tensor.shape),
+                    "data_offsets": [offset, offset + size],
+                }
+                offset += size
+        if f.metadata():
+            header["__metadata__"] = f.metadata()
+        blob = json.dumps(header, separators=(",", ":")).encode()
+        blob += b" " * (-len(blob) % 8)
+        out.write(struct.pack("<Q", len(blob)) + blob)
+        for key in keys:
+            for tensor in convert(key, f.get_tensor(key)).values():
+                out.write(tensor.contiguous().reshape(-1).view(torch.uint8).numpy())
+    os.replace(tmp, path)
+
+
 def shrink(path: Path, dtype: torch.dtype = torch.bfloat16) -> bool:
     """Rewrite a safetensors file with its float32 tensors cast to ``dtype``. Returns True if it changed."""
     from safetensors import safe_open
-    from safetensors.torch import save_file
 
     with safe_open(str(path), "pt") as f:
-        metadata = f.metadata()
-        tensors = {key: f.get_tensor(key) for key in f.keys()}
-    changed = False
-    for key, tensor in tensors.items():
-        if tensor.dtype == torch.float32:
-            tensors[key] = tensor.to(dtype)
-            changed = True
-    if changed:
-        tmp = path.with_name(path.name + ".tmp")
-        save_file(tensors, str(tmp), metadata=metadata)
-        os.replace(tmp, path)
-    return changed
+        if not any(f.get_slice(key).get_dtype() == "F32" for key in f.keys()):
+            return False
+    _rewrite(path, lambda key, t: {key: t.to(dtype) if t.dtype == torch.float32 else t})
+    return True
 
 
 def to_fp8_text_encoder(path: Path) -> None:
     """Rewrite a UMT5 shard: matmul weights -> scaled fp8 (+ ``.fp8_scale``), everything else -> bf16."""
-    from safetensors import safe_open
-    from safetensors.torch import save_file
-
     from aivideogen.wan import is_t5_linear_weight, quantize_fp8
 
-    out = {}
-    with safe_open(str(path), "pt") as f:
-        metadata = f.metadata()
-        for key in f.keys():
-            tensor = f.get_tensor(key)
-            if is_t5_linear_weight(key, tensor):
-                out[key], out[key.removesuffix("weight") + "fp8_scale"] = quantize_fp8(tensor)
-            else:
-                out[key] = tensor.to(torch.bfloat16) if tensor.is_floating_point() else tensor
-    tmp = path.with_name(path.name + ".tmp")
-    save_file(out, str(tmp), metadata=metadata)
-    os.replace(tmp, path)
+    def convert(key: str, tensor: torch.Tensor) -> dict[str, torch.Tensor]:
+        if is_t5_linear_weight(key, tensor):
+            weight, scale = quantize_fp8(tensor)
+            return {key: weight, key.removesuffix("weight") + "fp8_scale": scale}
+        return {key: tensor.to(torch.bfloat16) if tensor.is_floating_point() else tensor}
+
+    _rewrite(path, convert)
 
 
 def _order(rfilename: str) -> int:

@@ -180,3 +180,33 @@ def test_download_shrinks_the_model_for_small_disks(tiny_model, tmp_path, monkey
     assert torch.nn.functional.cosine_similarity(a.flatten(), b.flatten(), dim=0) > 0.99
     WanPipeline.from_pretrained(out)  # still a loadable model
     assert download_model("some/repo", tmp_path / "model", log=quiet) == out  # resumable no-op
+
+
+def test_streamed_rewrite_matches_a_regular_save(tmp_path):
+    from safetensors import safe_open
+    from safetensors.torch import load_file, save_file
+
+    from aivideogen.download import to_fp8_text_encoder
+    from aivideogen.wan import quantize_fp8
+
+    torch.manual_seed(0)
+    original = {
+        "encoder.block.0.layer.0.SelfAttention.q.weight": torch.randn(8, 4),
+        "encoder.block.0.layer.1.DenseReluDense.wo.weight": torch.randn(4, 8),
+        "shared.weight": torch.randn(10, 4),
+        "encoder.final_layer_norm.weight": torch.ones(4),
+        "steps": torch.tensor([7], dtype=torch.int64),
+    }
+    path = tmp_path / "shard.safetensors"
+    save_file(original, str(path), metadata={"format": "pt"})
+    to_fp8_text_encoder(path)
+    out = load_file(str(path))
+    q = "encoder.block.0.layer.0.SelfAttention.q"
+    weight, scale = quantize_fp8(original[f"{q}.weight"])
+    assert torch.equal(out[f"{q}.weight"].view(torch.uint8), weight.view(torch.uint8))
+    assert torch.equal(out[f"{q}.fp8_scale"], scale)
+    assert out["encoder.block.0.layer.1.DenseReluDense.wo.weight"].dtype == torch.bfloat16
+    assert torch.equal(out["shared.weight"], original["shared.weight"].to(torch.bfloat16))
+    assert torch.equal(out["steps"], original["steps"])
+    with safe_open(str(path), "pt") as f:
+        assert f.metadata() == {"format": "pt"}
