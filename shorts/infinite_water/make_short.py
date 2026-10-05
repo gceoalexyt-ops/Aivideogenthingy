@@ -200,7 +200,7 @@ def face_sprite(tex, face, a, hq, frame, alq):
     local = [(q[0] - minx, q[1] - miny) for q in poly]
     mask = Image.new("L", (bw, bh), 0)
     ImageDraw.Draw(mask).polygon(local, fill=255, outline=255)
-    if tex in ("grass_top", "grass_side", "dirt"):
+    if tex not in ("water", "flow", "lava", "lavaflow"):  # outline solid blocks
         edge = Image.new("RGBA", (bw, bh), (0, 0, 0, 0))
         ImageDraw.Draw(edge).line(local + [local[0]], fill=(0, 0, 0, 55), width=max(1, a // 40))
         img = Image.alpha_composite(img, edge)
