@@ -45,7 +45,7 @@ def nearest_bucket(height: int, width: int, buckets: list[tuple[int, int]]) -> t
 
 
 def _fit(image: Image.Image, height: int, width: int) -> Image.Image:
-    """Resize to cover (height, width) and center-crop. No flips: her beauty mark is on one side."""
+    """Resize to cover (height, width) and center-crop. No flips: faces and hair partings are asymmetric."""
     scale = max(width / image.width, height / image.height)
     resized = image.resize(
         (max(width, math.ceil(image.width * scale)), max(height, math.ceil(image.height * scale))),

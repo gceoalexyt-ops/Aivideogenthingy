@@ -1,4 +1,5 @@
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from aivideogen.character import Character
@@ -8,7 +9,20 @@ from aivideogen.safety import UnsafePromptError, check_prompt
 def test_repo_character_is_an_adult_with_a_trigger(character):
     assert character.age >= 18
     assert character.tag == "mksrn woman"
-    assert "Eurasian" in character.looks()
+    assert character.looks().startswith(f"a {character.age}-year-old woman with ")
+    assert character.appearance.eyes in character.looks()
+
+
+def test_heritage_is_optional_and_joins_the_description(character):
+    described = character.model_copy(update={"heritage": "Eurasian"})
+    assert described.looks().startswith(f"a {character.age}-year-old Eurasian woman with ")
+
+
+def test_reference_image_resolves_next_to_the_character_file(tmp_path, character):
+    data = character.model_dump(mode="json")
+    data["reference_image"] = "private/me.jpg"
+    (tmp_path / "her.yaml").write_text(yaml.safe_dump(data))
+    assert Character.load(tmp_path / "her.yaml").reference_image == tmp_path / "private" / "me.jpg"
 
 
 def _raw(character, **changes):

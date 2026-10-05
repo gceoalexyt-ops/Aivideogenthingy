@@ -29,9 +29,9 @@ def test_captions_bind_identity_to_the_trigger(character):
         caption = shot.caption(character)
         assert caption.startswith("mksrn woman, ")
         # Her face and hair must not be described in captions, so the model attaches them to the trigger.
-        for feature_word in ("hazel", "freckles", "beauty mark", "dark-brown", "Eurasian"):
-            assert feature_word not in caption
-        assert "hazel-brown eyes" in shot.generation_prompt(character)
+        for feature in character.appearance.model_dump().values():
+            assert not feature or feature not in caption
+        assert character.appearance.hair in shot.generation_prompt(character)
 
 
 @pytest.mark.parametrize("ratio", list(ASPECT_RATIOS))
@@ -57,7 +57,7 @@ def test_build_is_resumable_and_writes_manifest(tmp_path, character):
     backend = MockBackend()
     make_anchor_candidates(character, backend, paths, count=2, log=quiet)
     assert paths.anchor.exists()
-    pick_anchor(paths, 2)
+    pick_anchor(paths, 2, character)
     made, failures = build_images(character, backend, paths, count=5, log=quiet)
     assert (made, failures) == (5, [])
     assert build_images(character, backend, paths, count=5, log=quiet)[0] == 0
@@ -70,8 +70,36 @@ def test_build_is_resumable_and_writes_manifest(tmp_path, character):
 
 
 def test_build_needs_an_anchor(tmp_path, character):
+    no_photo = character.model_copy(update={"reference_image": None})
     with pytest.raises(FileNotFoundError, match="anchor"):
-        build_images(character, MockBackend(), DatasetPaths(tmp_path / "empty"), count=1, log=quiet)
+        build_images(no_photo, MockBackend(), DatasetPaths(tmp_path / "empty"), count=1, log=quiet)
+
+
+def test_profile_photo_becomes_the_anchor_with_its_caption(tmp_path, character):
+    photo = tmp_path / "profile.jpg"
+    Image.new("RGB", (300, 400), "tan").save(photo)
+    her = character.model_copy(update={"reference_image": photo, "reference_caption": "holding a mug"})
+    paths = DatasetPaths(tmp_path / "ds")
+    made, _ = build_images(her, MockBackend(), paths, count=2, log=quiet)
+    assert made == 2
+    with Image.open(paths.anchor) as anchor:
+        assert anchor.format == "PNG" and anchor.size == (300, 400)
+    captions = {s.media.name: s.caption for s in list_samples(paths.images)}
+    assert captions["000_anchor.png"] == "mksrn woman, holding a mug"
+
+
+def test_missing_profile_photo_explains_itself(tmp_path, character):
+    gone = character.model_copy(update={"reference_image": tmp_path / "nope.jpg"})
+    with pytest.raises(FileNotFoundError, match="profile photo"):
+        build_images(gone, MockBackend(), DatasetPaths(tmp_path / "ds"), count=1, log=quiet)
+
+
+def test_picking_an_arbitrary_photo_captions_it_with_just_her_tag(tmp_path, character):
+    photo = tmp_path / "any.png"
+    Image.new("RGB", (64, 64)).save(photo)
+    paths = DatasetPaths(tmp_path / "ds")
+    pick_anchor(paths, photo, character)
+    assert paths.anchor.with_suffix(".txt").read_text().strip() == character.tag
 
 
 def test_one_failed_image_does_not_stop_the_batch(tmp_path, character):

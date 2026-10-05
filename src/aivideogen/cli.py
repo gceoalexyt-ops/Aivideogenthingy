@@ -22,18 +22,27 @@ def cmd_character(args) -> None:
     c = _character(args)
     print(f"{c.name}, {c.age} — trigger tag: {c.tag!r}\n")
     print("Her look (used to synthesize the dataset):\n  " + c.looks() + "\n")
-    print("Anchor portrait prompt:\n  " + anchor_prompt(c) + "\n")
+    if c.reference_image:
+        found = "found" if c.reference_image.exists() else "MISSING: put her photo there"
+        print(f"Her face comes from the profile photo {c.reference_image} ({found}).\n")
+    else:
+        print("Anchor portrait prompt:\n  " + anchor_prompt(c) + "\n")
     print("Example: 'Mika dances in the rain' becomes:\n  " + c.prompt_for("Mika dances in the rain"))
 
 
 def cmd_dataset_anchor(args) -> None:
     from aivideogen.dataset.backends import get_backend
-    from aivideogen.dataset.build import make_anchor_candidates
+    from aivideogen.dataset.build import install_reference, make_anchor_candidates
 
     paths = DatasetPaths(args.dataset)
+    character = _character(args)
+    if character.reference_image and not args.generate:
+        print(f"anchor set from her profile photo: {install_reference(character, paths)}")
+        print("(pass --generate to draw candidate portraits from her text description instead)")
+        return
     backend = get_backend(args.backend, args.model)
     try:
-        made = make_anchor_candidates(_character(args), backend, paths, count=args.count, seed=args.seed)
+        made = make_anchor_candidates(character, backend, paths, count=args.count, seed=args.seed)
     finally:
         backend.close()
     print(f"\n{len(made)} candidates in {paths.anchors}. Using {paths.anchor} as her reference;")
@@ -43,7 +52,7 @@ def cmd_dataset_anchor(args) -> None:
 def cmd_dataset_pick(args) -> None:
     from aivideogen.dataset.build import pick_anchor
 
-    print(f"anchor set: {pick_anchor(DatasetPaths(args.dataset), args.choice)}")
+    print(f"anchor set: {pick_anchor(DatasetPaths(args.dataset), args.choice, _character(args))}")
 
 
 def cmd_dataset_build(args) -> None:
@@ -234,8 +243,13 @@ def build_parser() -> argparse.ArgumentParser:
         parser.add_argument("--seed", type=int, default=0)
         return parser
 
-    a = with_backend(with_dataset(ds_sub.add_parser("anchor", help="draw candidate portraits of her")))
+    a = with_backend(
+        with_dataset(ds_sub.add_parser("anchor", help="set her identity reference (profile photo or drawn)"))
+    )
     a.add_argument("--count", type=int, default=4)
+    a.add_argument(
+        "--generate", action="store_true", help="draw candidates from text even if a profile photo is set"
+    )
     a.set_defaults(fn=cmd_dataset_anchor)
 
     pk = with_dataset(ds_sub.add_parser("pick", help="choose which candidate is her reference"))

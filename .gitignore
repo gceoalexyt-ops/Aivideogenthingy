@@ -16,3 +16,6 @@ models/
 
 # Secrets
 .env
+
+# Personal reference photos (faces) stay local
+private/

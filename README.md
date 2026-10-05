@@ -1,17 +1,17 @@
 # Aivideogenthingy: her own video model
 
-A video generator with one star. **Mika Sorensen**, a fictional 23-year-old Eurasian woman (half Japanese,
-half Danish), is trained into the weights of an open-source video model (Wan 2.x). Every video it generates
+A video generator with one star. **Mika Sorensen**, a fictional 23-year-old woman whose face comes from a
+profile photo, is trained into the weights of an open-source video model (Wan 2.x). Every video it generates
 is of her: write *"Mika walks through a rainy neon-lit street at night"* and you get that clip, with her face.
 
 ```
 character.yaml ──► her dataset ──────► fine-tune (LoRA) ──────► generate
- who she is        ~40 consistent       Wan 2.x learns the       "Mika ..." → mp4
+ + profile photo   ~40 consistent       Wan 2.x learns the       "Mika ..." → mp4
                    photos of her        token "mksrn woman"
 ```
 
-1. **Anchor portrait.** An image model draws her from the description in `character.yaml`. You pick the best
-   of a few candidates; that image defines her face.
+1. **Anchor.** Her profile photo (`private/profile.jpg`) defines her face. Without a photo, an image model draws
+   candidates from the description in `character.yaml` and you pick the best.
 2. **Dataset.** An identity-preserving image model redraws her in ~40 varied shots: angles, distances,
    expressions, outfits, places and light. Captions name the trigger tag `mksrn woman` plus everything that should
    stay controllable, and never her face, so the model binds her face to the tag.
@@ -21,9 +21,12 @@ character.yaml ──► her dataset ──────► fine-tune (LoRA) ─�
 
 ## Meet her
 
-Everything about her lives in [`character.yaml`](character.yaml): name, trigger word, age, heritage, face,
-eyes, skin, hair, build, a beauty mark under her left eye, and a signature outfit. Edit it to change her,
-but changing her look after training means rebuilding the dataset and retraining.
+Her face comes from her profile photo, named by `reference_image` in [`character.yaml`](character.yaml)
+(default `private/profile.jpg`). Put the photo there. `private/` is git-ignored because this repo is public,
+so a fresh clone needs the photo copied in again. `character.yaml` also holds her name, trigger word, age, a
+description of what's visible in the photo (face, eyes, skin, hair, build), what the photo itself shows
+(`reference_caption`), and her signature outfit. Edit it to change her, but changing her look after training
+means rebuilding the dataset and retraining.
 
 `aivideogen character` prints her full description and shows how prompts get rewritten.
 
@@ -54,9 +57,9 @@ Install PyTorch with CUDA for your machine, then:
 ```bash
 pip install -e '.[ui]'
 
-# 1. Her anchor portrait: draws 4 candidates into data/dataset/anchors/
-aivideogen dataset anchor --backend qwen     # open Qwen-Image models on your GPU (~48 GB VRAM)
-aivideogen dataset pick 2                    # choose the candidate that looks right
+# 1. Her anchor: installs private/profile.jpg as her identity reference
+aivideogen dataset anchor
+#    (no photo? `aivideogen dataset anchor --generate` draws 4 candidates, then `aivideogen dataset pick 2`)
 
 # 2. Her dataset: 40 shots that keep her identity
 aivideogen dataset build --backend qwen --count 40
@@ -109,6 +112,8 @@ aivideogen ui            # http://127.0.0.1:7860   (add --share for a public lin
   modal run modal_app.py::generate --prompt "Mika dances in the rain at night"
   ```
 
+  Her profile photo in `private/` is sent to your own Modal account so the dataset step can use it.
+
   Set `AIVIDEOGEN_GPU=A100-80GB` (or another Modal GPU type) to change hardware.
 
 ## Using her model elsewhere
@@ -124,8 +129,10 @@ The merged model in `models/<name>/` loads with `WanPipeline.from_pretrained("mo
 
 - **The dataset is the model.** 25–50 images, and every one has to be unmistakably her. Delete drifted faces
   without mercy.
+- **One photo is enough to start.** The dataset step generates the variety from it. If you have more photos of
+  her from other angles, add them with `aivideogen dataset import`; they strengthen the likeness.
 - **Keep the variety.** Close-ups, full body, different angles, expressions, outfits, places and light.
-  Images are never mirrored during training, because her beauty mark is on one side.
+  Images are never mirrored during training, because faces and hair partings are asymmetric.
 - **Compare the samples across steps.** If she looks right at step 1500 and later looks stiff or "baked",
   generate from that checkpoint: `--lora runs/<name>/checkpoints/step-001500`.
 - **Tune with `--lora-scale`.** If the likeness is too weak, try 1.1–1.2 or more steps. If the look is overcooked,
@@ -135,14 +142,15 @@ The merged model in `models/<name>/` loads with `WanPipeline.from_pretrained("mo
 
 - Mika is fictional and an adult. `character.yaml` refuses any age under 18, and every prompt (dataset synthesis,
   training samples, generation) passes a guard that rejects depicting her as a minor.
-- Don't train this on photos of a real person without their explicit consent.
+- Use an AI-generated face, or photos of someone who has explicitly agreed. Don't train this on a real person
+  without their consent.
 - Check the licenses of the base models you use (Wan 2.x and Qwen-Image are Apache 2.0) and the terms of any
   hosted service.
 
 ## Project layout
 
 ```
-character.yaml                 who she is
+character.yaml                 who she is (+ private/profile.jpg, her face; git-ignored)
 configs/                       training presets (GPU sizes) + tiny CPU demo
 src/aivideogen/
   character.py, safety.py      her definition, prompt rewriting, minor-depiction guard
@@ -151,7 +159,7 @@ src/aivideogen/
   generate.py, export.py       video generation, ComfyUI / merged-model export
   webui.py, cli.py, tiny.py    Gradio UI, command line, tiny test model
 modal_app.py                   optional cloud-GPU runner
-tests/                         47 tests; full train→generate→export runs on the tiny model
+tests/                         52 tests; full train→generate→export runs on the tiny model
 ```
 
 ## Development

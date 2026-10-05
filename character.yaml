@@ -1,8 +1,9 @@
 # The one character this whole project is about.
 #
-# Every training image is generated from this description, the fine-tuned model
-# learns to bind her identity to the trigger word, and every video prompt is
-# rewritten to feature her. She is a fictional adult; `age` must be 18 or older.
+# Her face comes from the profile photo below; the description reinforces what's visible in it. Every
+# training image is generated from the photo + description, the fine-tuned model learns to bind her
+# identity to the trigger word, and every video prompt is rewritten to feature her.
+# She is a fictional adult; `age` must be 18 or older.
 #
 # Changing her look after training means rebuilding the dataset and retraining.
 
@@ -10,15 +11,22 @@ name: Mika Sorensen
 trigger: mksrn            # rare token the model learns as "her"; use it (or her name) in prompts
 age: 23
 class_word: woman
-heritage: Eurasian (half Japanese, half Danish)
+heritage: ""              # optional background descriptor added to image prompts
+
+# Her face. private/ is git-ignored, so the photo is never published with the repo.
+reference_image: private/profile.jpg
+reference_caption: >-
+  medium shot from the waist up, in three-quarter view looking out a large window, smiling,
+  holding a ceramic mug with her other hand in her pocket, wearing a cream ribbed knit sweater
+  and black jeans, in a bright bedroom, soft natural daylight
 
 appearance:
-  face: soft oval face, high cheekbones, small straight nose and full natural lips
-  eyes: almond-shaped hazel-brown eyes with soft double eyelids
-  skin: fair skin with warm undertones and a few faint freckles across her nose
-  hair: long straight dark-brown hair past her shoulders with soft curtain bangs
-  build: slim build, 168 cm (5'6") tall
-  marks: a small beauty mark under her left eye
+  face: an oval face, defined cheekbones, a straight nose, full natural eyebrows and a wide, bright smile
+  eyes: warm brown eyes
+  skin: warm, lightly tanned skin
+  hair: long, softly layered dark-brown hair with caramel highlights, worn down with a center part
+  build: slim build
+  marks: ""
 
-signature_outfit: a cream oversized knit sweater, light-wash straight-leg jeans and white sneakers
+signature_outfit: a cream ribbed knit sweater and black jeans
 style: photorealistic, natural skin texture, cinematic color

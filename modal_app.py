@@ -44,8 +44,10 @@ image = (
     .env({"HF_HOME": f"{VOL}/hf"})
     .add_local_file("character.yaml", "/app/character.yaml")
     .add_local_dir("configs", "/app/configs")
-    .add_local_python_source("aivideogen")
 )
+if Path("private").is_dir():  # her profile photo (git-ignored) goes to your own Modal account only
+    image = image.add_local_dir("private", "/app/private")
+image = image.add_local_python_source("aivideogen")
 remote = app.function(image=image, gpu=GPU, volumes={VOL: volume}, timeout=12 * 3600)
 
 
@@ -54,6 +56,8 @@ def _enter_volume() -> None:
     volume.reload()
     os.chdir(VOL)
     shutil.copyfile("/app/character.yaml", "character.yaml")
+    if Path("/app/private").is_dir():
+        shutil.copytree("/app/private", "private", dirs_exist_ok=True)
 
 
 @remote

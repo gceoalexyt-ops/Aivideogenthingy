@@ -180,10 +180,14 @@ def build(app: App):
 
     c = app.character
     with gr.Blocks(title=f"{c.name} — video model") as ui:
-        gr.Markdown(
-            f"# {c.name}\nHer own fine-tuned video model. Trigger tag: `{c.tag}`. "
-            f"Write her name or *she* in prompts and she'll be in the video."
-        )
+        with gr.Row():
+            if c.reference_image and c.reference_image.exists():
+                gr.Image(str(c.reference_image), show_label=False, interactive=False, height=180, scale=0)
+            gr.Markdown(
+                f"# {c.name}\nHer own fine-tuned video model. Trigger tag: `{c.tag}`. "
+                f"Write her name or *she* in prompts and she'll be in the video."
+            )
+
         with gr.Tab("Generate"):
             with gr.Row():
                 with gr.Column(scale=1):

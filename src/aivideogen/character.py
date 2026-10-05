@@ -25,10 +25,13 @@ class Character(BaseModel):
     trigger: str
     age: int
     class_word: str = "woman"
-    heritage: str
+    heritage: str = ""
     appearance: Appearance
     signature_outfit: str
     style: str = "photorealistic, natural skin texture"
+    # A photo that defines her face. When set, it is her identity anchor instead of a generated portrait.
+    reference_image: Path | None = None
+    reference_caption: str = ""  # what the reference photo shows (framing, pose, outfit, place, light)
 
     @field_validator("age")
     @classmethod
@@ -49,7 +52,10 @@ class Character(BaseModel):
     @classmethod
     def load(cls, path: str | Path = DEFAULT_CHARACTER_FILE) -> Character:
         with open(path, encoding="utf-8") as f:
-            return cls.model_validate(yaml.safe_load(f))
+            character = cls.model_validate(yaml.safe_load(f))
+        if character.reference_image and not character.reference_image.is_absolute():
+            character.reference_image = Path(path).parent / character.reference_image
+        return character
 
     @property
     def first_name(self) -> str:
@@ -68,9 +74,8 @@ class Character(BaseModel):
         """
         a = self.appearance
         features = [a.face, a.eyes, a.skin, a.hair, a.build, a.marks]
-        return f"a {self.age}-year-old {self.heritage} {self.class_word} with " + ", ".join(
-            f for f in features if f
-        )
+        who = " ".join(w for w in [f"a {self.age}-year-old", self.heritage, self.class_word] if w)
+        return f"{who} with " + "; ".join(f for f in features if f)
 
     def prompt_for(self, scene: str) -> str:
         """Rewrite a free-form scene description so it features her.

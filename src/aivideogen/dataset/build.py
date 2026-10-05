@@ -8,9 +8,11 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from PIL import Image, ImageOps
+
 from aivideogen.character import Character
 from aivideogen.dataset.backends import ImageBackend
-from aivideogen.dataset.files import DatasetPaths
+from aivideogen.dataset.files import DatasetPaths, ensure_tagged
 from aivideogen.dataset.shots import anchor_caption, anchor_prompt, plan_shots
 from aivideogen.safety import check_prompt
 
@@ -35,21 +37,42 @@ def make_anchor_candidates(
         backend.text_to_image(prompt, aspect_ratio="1:1", seed=seed + i).save(target)
         out.append(target)
     if not paths.anchor.exists() and out:
-        pick_anchor(paths, out[0])
+        pick_anchor(paths, 1, character)
     return out
 
 
-def pick_anchor(paths: DatasetPaths, choice: str | int | Path) -> Path:
-    """Make a candidate (by number, e.g. ``2``, or by path) her identity reference."""
+def set_anchor(paths: DatasetPaths, source: Path, caption: str) -> Path:
+    """Make ``source`` her identity reference. The caption describing it is kept alongside."""
+    paths.root.mkdir(parents=True, exist_ok=True)
+    with Image.open(source) as image:
+        ImageOps.exif_transpose(image).convert("RGB").save(paths.anchor)
+    paths.anchor.with_suffix(".txt").write_text(caption + "\n", encoding="utf-8")
+    return paths.anchor
+
+
+def pick_anchor(paths: DatasetPaths, choice: str | int | Path, character: Character) -> Path:
+    """Make a generated candidate (by number, e.g. ``2``) or any image of her (by path) the anchor."""
     if isinstance(choice, int) or str(choice).isdigit():
-        source = paths.anchors / f"candidate_{int(choice)}.png"
+        source, caption = paths.anchors / f"candidate_{int(choice)}.png", anchor_caption(character)
     else:
-        source = Path(choice)
+        # An arbitrary photo: we don't know what it shows, so the caption is just her tag.
+        source, caption = Path(choice), character.tag
     if not source.exists():
         raise FileNotFoundError(source)
-    paths.root.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, paths.anchor)
-    return paths.anchor
+    return set_anchor(paths, source, caption)
+
+
+def install_reference(character: Character, paths: DatasetPaths) -> Path:
+    """Use the profile photo named in character.yaml (``reference_image``) as her anchor."""
+    photo = character.reference_image
+    if photo is None:
+        raise ValueError("character.yaml has no reference_image")
+    if not photo.exists():
+        raise FileNotFoundError(
+            f"Her profile photo {photo} is missing (it isn't committed to git). Put the photo there, "
+            "or remove reference_image from character.yaml to generate her face from text instead."
+        )
+    return set_anchor(paths, photo, ensure_tagged(character.reference_caption, character))
 
 
 def build_images(
@@ -66,15 +89,22 @@ def build_images(
     Returns (number of new images, list of failures).
     """
     if not paths.anchor.exists():
-        raise FileNotFoundError(
-            f"No anchor portrait at {paths.anchor}. Run `aivideogen dataset anchor` first."
-        )
+        if character.reference_image is None:
+            raise FileNotFoundError(
+                f"No anchor portrait at {paths.anchor}. Run `aivideogen dataset anchor` first."
+            )
+        install_reference(character, paths)
+        log(f"using her profile photo {character.reference_image} as the anchor")
     paths.images.mkdir(parents=True, exist_ok=True)
 
     anchor_copy = paths.images / "000_anchor.png"
     if overwrite or not anchor_copy.exists():
         shutil.copyfile(paths.anchor, anchor_copy)
-        anchor_copy.with_suffix(".txt").write_text(anchor_caption(character) + "\n", encoding="utf-8")
+        caption_file = paths.anchor.with_suffix(".txt")
+        caption = caption_file.read_text(encoding="utf-8").strip() if caption_file.exists() else ""
+        anchor_copy.with_suffix(".txt").write_text(
+            (caption or anchor_caption(character)) + "\n", encoding="utf-8"
+        )
 
     shots = plan_shots(character, count, seed)
     made, failures = 0, []
