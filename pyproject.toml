@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aivideogen"
+version = "0.1.0"
+description = "Train a video model of one consistent character (LoRA fine-tune of Wan 2.x) and generate videos of her from text."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.5",
+  "diffusers>=0.36",
+  "transformers>=4.56",
+  "peft>=0.17",
+  "accelerate>=1.0",
+  "safetensors",
+  "sentencepiece",
+  "ftfy",
+  "numpy",
+  "pillow",
+  "pyyaml",
+  "pydantic>=2",
+  "imageio[ffmpeg]",
+]
+
+[project.optional-dependencies]
+ui = ["gradio>=5"]
+replicate = ["replicate>=1.0"]
+cloud = ["modal>=1.0"]
+optim = ["bitsandbytes"]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+aivideogen = "aivideogen.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

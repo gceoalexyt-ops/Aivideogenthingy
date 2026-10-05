@@ -1,0 +1,24 @@
+# Fast and cheap: Wan 2.1 text-to-video 1.3B (16 GB+ VRAM). Weaker likeness than 14B; good for a first try.
+name: mika-wan21-1.3b
+model:
+  base: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+  precision: bf16
+lora:
+  rank: 32
+  alpha: 32
+data:
+  dataset_dir: data/dataset/images
+  cache_dir: data/cache
+  resolution: 512
+train:
+  steps: 3000
+  learning_rate: 1.0e-4
+  warmup_steps: 50
+save_every: 250
+sample:
+  every: 250
+  width: 832
+  height: 480
+  num_frames: 33
+  steps: 30
+  flow_shift: 3.0

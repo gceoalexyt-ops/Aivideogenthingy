@@ -1,0 +1,26 @@
+# Best quality. Wan 2.1 text-to-video 14B, trained in bf16.
+# GPU: 48 GB+ VRAM (A6000 / L40S / A100 / H100). On a 24 GB card use wan21_14b_24gb.yaml.
+# Roughly 1.5-3 hours on an H100 for 2500 steps.
+name: mika-wan21-14b
+model:
+  base: Wan-AI/Wan2.1-T2V-14B-Diffusers
+  precision: bf16
+lora:
+  rank: 32
+  alpha: 32
+data:
+  dataset_dir: data/dataset/images
+  cache_dir: data/cache
+  resolution: 640
+train:
+  steps: 2500
+  learning_rate: 1.0e-4
+  warmup_steps: 50
+save_every: 250
+sample:
+  every: 250
+  width: 832
+  height: 480
+  num_frames: 33
+  steps: 30
+  flow_shift: 3.0

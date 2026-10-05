@@ -1,0 +1,26 @@
+# Wan 2.2 TI2V 5B: 720p at 24 fps, fits a 24 GB card in bf16.
+name: mika-wan22-5b
+model:
+  base: Wan-AI/Wan2.2-TI2V-5B-Diffusers
+  precision: bf16
+lora:
+  rank: 32
+  alpha: 32
+data:
+  dataset_dir: data/dataset/images
+  cache_dir: data/cache
+  resolution: 768
+  video_fps: 24
+train:
+  steps: 2500
+  learning_rate: 1.0e-4
+  warmup_steps: 50
+save_every: 250
+sample:
+  every: 500
+  width: 1280
+  height: 704
+  num_frames: 49
+  steps: 30
+  flow_shift: 5.0
+  fps: 24

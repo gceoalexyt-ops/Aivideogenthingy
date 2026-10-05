@@ -1,0 +1,28 @@
+# Used by `aivideogen demo` and the tests: a miniature random Wan model, runs on CPU in about a minute.
+name: demo
+output_dir: data/demo/runs
+device: cpu
+save_every: 20
+keep_checkpoints: 2
+model:
+  base: data/demo/tiny-wan
+  precision: fp32
+lora:
+  rank: 8
+  alpha: 8
+data:
+  dataset_dir: data/demo/dataset/images
+  cache_dir: data/demo/cache
+  resolution: 64
+  max_sequence_length: 64
+train:
+  steps: 40
+  learning_rate: 5.0e-4
+  warmup_steps: 5
+sample:
+  every: 20
+  width: 64
+  height: 64
+  num_frames: 9
+  steps: 4
+  fps: 8

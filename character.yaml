@@ -1,0 +1,24 @@
+# The one character this whole project is about.
+#
+# Every training image is generated from this description, the fine-tuned model
+# learns to bind her identity to the trigger word, and every video prompt is
+# rewritten to feature her. She is a fictional adult; `age` must be 18 or older.
+#
+# Changing her look after training means rebuilding the dataset and retraining.
+
+name: Mika Sorensen
+trigger: mksrn            # rare token the model learns as "her"; use it (or her name) in prompts
+age: 23
+class_word: woman
+heritage: Eurasian (half Japanese, half Danish)
+
+appearance:
+  face: soft oval face, high cheekbones, small straight nose and full natural lips
+  eyes: almond-shaped hazel-brown eyes with soft double eyelids
+  skin: fair skin with warm undertones and a few faint freckles across her nose
+  hair: long straight dark-brown hair past her shoulders with soft curtain bangs
+  build: slim build, 168 cm (5'6") tall
+  marks: a small beauty mark under her left eye
+
+signature_outfit: a cream oversized knit sweater, light-wash straight-leg jeans and white sneakers
+style: photorealistic, natural skin texture, cinematic color

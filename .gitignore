@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Generated data, trained weights and videos (large; never commit)
+data/
+runs/
+outputs/
+models/
+
+# Secrets
+.env
