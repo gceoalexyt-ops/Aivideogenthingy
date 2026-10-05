@@ -7,6 +7,9 @@ from the open Kokoro TTS model, and synthesized music and sound effects, muxed w
     pip install pillow numpy kokoro-onnx soundfile      # plus ffmpeg on PATH
     python shorts/infinite_water/make_short.py         # -> shorts/infinite_water/infinite_water_short.mp4
 
+Scenes listed in BROLL cut to real gameplay from broll/luanti_broll.mp4, recorded in Luanti (an open-source
+Minecraft-like game) by broll/record.py; set NO_BROLL=1 for the fully animated version.
+
 The Kokoro model (~120 MB) downloads to ~/.cache/kokoro-onnx on first run (override with KOKORO_DIR).
 """
 
@@ -594,9 +597,60 @@ def cam_at(name, t, D):
     return zoom, focus, sy
 
 
+# Real gameplay b-roll recorded in Luanti (see broll/). scene -> (in-point in the clip, playback speed).
+BROLL_FILE = HERE / "broll" / "luanti_broll.mp4"
+BROLL = {"dig": (1.0, 1.0), "pour": (5.8, 1.0), "scoop": (13.3, 1.0), "lava": (22.0, 1.5), "outro": (31.2, 1.0)}
+# Clip times of the on-screen actions (from broll/director.lua), for sound effects.
+BROLL_SFX = {
+    "dig": [(1.6 + 0.6 * i, "pop") for i in range(4)],
+    "pour": [(6.5, "splash"), (9.0, "splash")],
+    "scoop": [(x, k) for t in (14.0, 16.0, 18.0) for x, k in ((t, "scoop"), (t + 0.4, "ding"))],
+    "lava": [(22.0, "splash"), (23.5, "splash")],
+}
+USE_BROLL = BROLL_FILE.exists() and not os.environ.get("NO_BROLL")
+
+
+def has_broll(name):
+    return USE_BROLL and name in BROLL
+
+
+class Clip:
+    """Streams b-roll frames for one scene, starting at its in-point."""
+
+    def __init__(self, start, speed):
+        cmd = ["ffmpeg", "-loglevel", "error", "-ss", str(start), "-i", str(BROLL_FILE),
+               "-vf", f"setpts=PTS/{speed},fps={FPS}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]  # fmt: skip
+        self.p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        self.last = None
+
+    def frame(self):
+        buf = self.p.stdout.read(W * H * 3)
+        if len(buf) == W * H * 3:
+            self.last = Image.frombytes("RGB", (W, H), buf)
+        return self.last.copy()
+
+    def close(self):
+        self.p.kill()
+        self.p.wait()
+
+
+def draw_broll_label(img):
+    paste_center(img, pill("REAL GAMEPLAY · LUANTI (MINECRAFT-LIKE)", 26, (25, 25, 30)), W / 2, 1330)
+
+
 def scene_events(c):
     """Sound effects (and particle bursts) per scene, in local time."""
     T, ev = c.T, []
+    if has_broll(c.name):
+        start, speed = BROLL[c.name]
+        ev += [((ft - start) / speed, kind, None) for ft, kind in BROLL_SFX.get(c.name, [])]
+        if c.name in ("dig", "lava", "outro"):
+            ev.append((0.0, "whoosh", None))
+        if c.name == "lava":
+            ev.append((c.w["lava"] + 0.3, "buzz", None))
+        if c.name == "outro":
+            ev.append((0.25, "chime", None))
+        return ev
     if c.name == "hook":
         ev.append((0.35, "ding", (3, 3, FULL)))
     elif c.name == "dig":
@@ -983,6 +1037,7 @@ def main():
     ]  # fmt: skip
     ff = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     frames = int(total * FPS)
+    clip, clip_scene = None, None
     for f in range(frames):
         t = f / FPS
         si = max(i for i, c in enumerate(ctxs) if c.start <= t)
@@ -998,16 +1053,28 @@ def main():
             focus = tuple(lerp(u, v, k) for u, v in zip(pf, focus))
             sy = lerp(psy, sy, k)
         P = Proj(zoom, focus, sy)
-        img = BG.copy()
-        draw_clouds(img, t)
-        draw_world(img, P, st, int(t * 6) % 8)
-        draw_particles(img, P, parts, t)
-        draw_scene_overlays(img, P, st)
+        broll = has_broll(c.name)
+        if broll:
+            if clip_scene != si:
+                if clip:
+                    clip.close()
+                clip, clip_scene = Clip(*BROLL[c.name]), si
+            img = clip.frame()
+        else:
+            img = BG.copy()
+            draw_clouds(img, t)
+            draw_world(img, P, st, int(t * 6) % 8)
+            draw_particles(img, P, parts, t)
+            draw_scene_overlays(img, P, st)
+        if si > 0 and broll != has_broll(ctxs[si - 1].name):
+            st["flash"] = max(st["flash"], 1 - clamp01(lt / 0.2))
         if c.name != "outro":
             draw_header(img)
+        if broll:
+            draw_broll_label(img)
         if st["panel"]:
             draw_panel(img, st["panel"])
-        if st["counter"]:
+        if st["counter"] and not broll:
             draw_counter(img, st["counter"])
         if st["follow"] is not None:
             draw_follow(img, st["follow"])
@@ -1018,6 +1085,8 @@ def main():
         ff.stdin.write(img.tobytes())
         if f % 150 == 0:
             print(f"frame {f}/{frames}")
+    if clip:
+        clip.close()
     ff.stdin.close()
     if ff.wait() != 0:
         raise SystemExit("ffmpeg failed")
