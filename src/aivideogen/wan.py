@@ -57,10 +57,19 @@ def resolve_device(preference: str = "auto") -> torch.device:
     return torch.device("cpu")
 
 
+def cpu_supports_bf16() -> bool:
+    """True on CPUs with AMX or AVX512-BF16, where bf16 matmuls run several times faster than fp32."""
+    try:
+        return bool(torch.cpu._is_amx_tile_supported() or torch.cpu._is_avx512_bf16_supported())
+    except AttributeError:
+        return False
+
+
 def resolve_dtype(precision: str, device: torch.device) -> torch.dtype:
-    if device.type == "cpu":
-        return torch.float32  # half precision on CPU is slow and poorly supported
-    return {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[precision]
+    dtypes = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
+    if device.type == "cpu" and not (precision == "bf16" and cpu_supports_bf16()):
+        return torch.float32  # other half-precision paths on CPU are slow or unsupported
+    return dtypes[precision]
 
 
 def dtype_kwarg(dtype: torch.dtype) -> dict:
@@ -132,9 +141,69 @@ def make_scheduler(base: str, flow_shift: float):
     return UniPCMultistepScheduler.from_config(scheduler.config, flow_shift=flow_shift)
 
 
+FP8 = torch.float8_e4m3fn
+FP8_MARKER = "fp8.json"  # written into a text_encoder folder whose Linear weights are stored as scaled fp8
+
+
+def quantize_fp8(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-tensor scaled float8: returns (fp8 weight, float32 scale of shape (1,))."""
+    weight = weight.float()
+    scale = weight.abs().amax().clamp(min=1e-12) / torch.finfo(FP8).max
+    return (weight / scale).to(FP8), scale.reshape(1)
+
+
+def is_t5_linear_weight(key: str, tensor: torch.Tensor) -> bool:
+    """UMT5 matmul weights that can be stored in fp8: not embeddings, norms, or the feed-forward output
+    projection ``wo``, whose dtype transformers' T5 code casts the activations to."""
+    keep = ("shared", "embed_tokens", "relative_attention_bias", "DenseReluDense.wo")
+    return tensor.ndim == 2 and key.endswith(".weight") and not any(name in key for name in keep)
+
+
 def _fp8_linear_forward(self, x: torch.Tensor) -> torch.Tensor:
     weight = self.weight.to(x.dtype) * self.fp8_scale.to(x.dtype)
     return F.linear(x, weight, self.bias)
+
+
+def _use_fp8_weight(module: torch.nn.Linear, weight: torch.Tensor, scale: torch.Tensor) -> None:
+    module.weight = torch.nn.Parameter(weight, requires_grad=False)
+    module.register_buffer("fp8_scale", scale.reshape(1).float())
+    module.forward = types.MethodType(_fp8_linear_forward, module)
+
+
+def load_text_encoder(base: str, dtype: torch.dtype):
+    """The UMT5 text encoder, including the scaled-fp8 layout `aivideogen download` writes to save disk.
+
+    fp8 Linear weights stay fp8 in memory (~8 GB instead of ~11 GB) and are upcast per matmul.
+    """
+    from pathlib import Path
+
+    from safetensors import safe_open
+    from transformers import UMT5Config, UMT5EncoderModel
+
+    folder = Path(base) / "text_encoder"
+    if not (folder / FP8_MARKER).exists():
+        return UMT5EncoderModel.from_pretrained(base, subfolder="text_encoder", dtype=dtype)
+    with torch.device("meta"):
+        model = UMT5EncoderModel(UMT5Config.from_pretrained(folder))
+    for shard in sorted(folder.glob("*.safetensors")):
+        with safe_open(str(shard), "pt") as f:
+            keys = set(f.keys())
+            for key in keys:
+                if key.endswith(".fp8_scale"):
+                    continue
+                module_name, _, attr = key.rpartition(".")
+                module = model.get_submodule(module_name)
+                tensor = f.get_tensor(key)
+                if tensor.dtype == FP8:
+                    _use_fp8_weight(module, tensor, f.get_tensor(key.removesuffix("weight") + "fp8_scale"))
+                else:
+                    setattr(module, attr, torch.nn.Parameter(tensor.to(dtype), requires_grad=False))
+    if model.encoder.embed_tokens.weight.is_meta:  # tied to `shared` and stored once
+        model.encoder.embed_tokens.weight = model.shared.weight
+    leftover = [name for name, p in model.named_parameters() if p.is_meta]
+    if leftover:
+        raise ValueError(f"text encoder weights missing from {folder}: {leftover[:3]}")
+    return model.eval()
 
 
 def store_frozen_linears_in_fp8(model: torch.nn.Module) -> int:
@@ -147,12 +216,21 @@ def store_frozen_linears_in_fp8(model: torch.nn.Module) -> int:
     for name, module in model.named_modules():
         if not (isinstance(module, torch.nn.Linear) and name.startswith("blocks.")):
             continue
-        if module.weight.requires_grad or module.weight.dtype == torch.float8_e4m3fn:
+        if module.weight.requires_grad or module.weight.dtype == FP8:
             continue
-        weight = module.weight.data.float()
-        scale = weight.abs().amax().clamp(min=1e-12) / torch.finfo(torch.float8_e4m3fn).max
-        module.register_buffer("fp8_scale", scale.reshape(1))
-        module.weight.data = (weight / scale).to(torch.float8_e4m3fn)
+        weight, scale = quantize_fp8(module.weight.data)
+        module.register_buffer("fp8_scale", scale)
+        module.weight.data = weight
         module.forward = types.MethodType(_fp8_linear_forward, module)
         converted += 1
     return converted
+
+
+@torch.no_grad()
+def decode_latents(vae, latents: torch.Tensor, video_processor):
+    """Latents from a pipeline run with ``output_type="latent"`` -> frames (F, H, W, 3) in [0, 1]."""
+    shape = (1, vae.config.z_dim, 1, 1, 1)
+    mean = torch.tensor(vae.config.latents_mean).view(shape).to(latents.device, vae.dtype)
+    std = torch.tensor(vae.config.latents_std).view(shape).to(latents.device, vae.dtype)
+    video = vae.decode(latents.to(vae.dtype) * std + mean, return_dict=False)[0]
+    return video_processor.postprocess_video(video, output_type="np")[0]

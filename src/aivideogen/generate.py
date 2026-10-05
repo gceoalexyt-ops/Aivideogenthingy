@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import re
 import time
@@ -11,18 +12,26 @@ from pathlib import Path
 
 import torch
 import yaml
+from PIL import Image, ImageOps
 
 from aivideogen.character import Character
 from aivideogen.safety import check_prompt
 from aivideogen.train.trainer import LORA_WEIGHTS
 from aivideogen.wan import (
     DEFAULT_NEGATIVE_PROMPT,
+    decode_latents,
     defaults_for,
     dtype_kwarg,
+    encode_texts,
     free_memory,
+    load_text_encoder,
+    pad_embeds,
     resolve_device,
     resolve_dtype,
+    text_encoding_pipeline,
 )
+
+MAX_SEQUENCE_LENGTH = 512
 
 
 @dataclass
@@ -76,6 +85,14 @@ def _slug(text: str, limit: int = 48) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:limit] or "video"
 
 
+def fit_to_image(area: int, image_size: tuple[int, int], multiple: int) -> tuple[int, int]:
+    """(width, height) with about ``area`` pixels and the photo's aspect ratio, divisible by ``multiple``."""
+    aspect = image_size[0] / image_size[1]
+    width = round(math.sqrt(area * aspect) / multiple) * multiple
+    height = round(math.sqrt(area / aspect) / multiple) * multiple
+    return max(multiple, width), max(multiple, height)
+
+
 class VideoGenerator:
     """Loads the pipeline once; call :meth:`generate` as often as you like."""
 
@@ -97,10 +114,21 @@ class VideoGenerator:
         self._pipe = None
         self._flow_shift: float | None = None
         self._lora_scale: float | None = None
+        self._embeds: dict[str, torch.Tensor] = {}
+
+    @property
+    def sequential(self) -> bool:
+        """Load the text encoder and the video model one at a time instead of together.
+
+        The default on CPU, where RAM rather than VRAM is the limit: the UMT5 text encoder alone is ~11 GB.
+        """
+        return self.memory == "sequential" or (self.memory == "auto" and self.device.type == "cpu")
 
     def _memory_mode(self, pipe) -> str:
-        if self.memory != "auto" or self.device.type != "cuda":
-            return self.memory if self.memory != "auto" else "gpu"
+        if self.memory in ("auto", "sequential") and self.device.type != "cuda":
+            return "gpu"  # i.e. everything on the one device
+        if self.memory != "auto":
+            return "gpu" if self.memory == "sequential" else self.memory
         vram = torch.cuda.get_device_properties(self.device).total_memory
         transformer = sum(p.numel() * p.element_size() for p in pipe.transformer.parameters())
         text_encoder = sum(p.numel() * p.element_size() for p in pipe.text_encoder.parameters())
@@ -115,8 +143,14 @@ class VideoGenerator:
             return self._pipe
         from diffusers import AutoencoderKLWan, WanPipeline
 
-        vae = AutoencoderKLWan.from_pretrained(self.base, subfolder="vae", **dtype_kwarg(torch.float32))
-        pipe = WanPipeline.from_pretrained(self.base, vae=vae, **dtype_kwarg(self.dtype))
+        # Wan's VAE prefers float32; on CPU, bf16 keeps it light enough to sit next to the video model.
+        vae_dtype = torch.float32 if self.device.type != "cpu" else self.dtype
+        vae = AutoencoderKLWan.from_pretrained(self.base, subfolder="vae", **dtype_kwarg(vae_dtype))
+        if self.sequential:
+            text = {"text_encoder": None, "tokenizer": None}
+        else:
+            text = {"text_encoder": load_text_encoder(self.base, self.dtype)}
+        pipe = WanPipeline.from_pretrained(self.base, vae=vae, **text, **dtype_kwarg(self.dtype))
         if self.lora is not None:
             pipe.load_lora_weights(
                 str(self.lora.parent), weight_name=self.lora.name, adapter_name="character"
@@ -144,7 +178,55 @@ class VideoGenerator:
         prompt = self.character.prompt_for(scene) if self.character else scene
         return check_prompt(prompt)
 
-    def generate(self, scene: str, settings: GenerationSettings, out_dir: Path = Path("outputs")) -> Path:
+    def _encode(self, prompts: list[str], lora_scale: float = 1.0) -> None:
+        """Compute (and remember) text embeddings for prompts not seen before."""
+        missing = [p for p in dict.fromkeys(prompts) if p not in self._embeds]
+        if not missing:
+            return
+        if self.sequential:
+            from transformers import AutoTokenizer
+
+            self._pipe = None  # the video model makes room for the text encoder, then comes back
+            free_memory()
+            tokenizer = AutoTokenizer.from_pretrained(self.base, subfolder="tokenizer")
+            text_encoder = load_text_encoder(self.base, self.dtype).to(self.device)
+            text_pipe = text_encoding_pipeline(tokenizer, text_encoder)
+        else:
+            pipe = self.load(lora_scale)
+            text_pipe = text_encoding_pipeline(pipe.tokenizer, pipe.text_encoder)
+        embeds = encode_texts(text_pipe, missing, MAX_SEQUENCE_LENGTH, self.device)
+        self._embeds.update(zip(missing, embeds, strict=True))
+        del text_pipe
+        free_memory()
+
+    def _padded(self, prompt: str) -> torch.Tensor:
+        return pad_embeds([self._embeds[prompt]], MAX_SEQUENCE_LENGTH).to(self.device, self.dtype)
+
+    def _image_pipeline(self, pipe):
+        """The same components, wired for image-to-video (Wan 2.2 TI2V: the photo is the first frame)."""
+        if not getattr(pipe.config, "expand_timesteps", False):
+            raise ValueError(
+                f"{self.base} can't animate a photo. Use Wan 2.2 TI2V 5B: `aivideogen download wan22-5b`."
+            )
+        from diffusers import WanImageToVideoPipeline
+
+        return WanImageToVideoPipeline(
+            tokenizer=pipe.tokenizer,
+            text_encoder=pipe.text_encoder,
+            vae=pipe.vae,
+            scheduler=pipe.scheduler,
+            transformer=pipe.transformer,
+            expand_timesteps=True,
+        )
+
+    def generate(
+        self,
+        scene: str,
+        settings: GenerationSettings,
+        out_dir: Path = Path("outputs"),
+        image: Path | None = None,
+    ) -> Path:
+        """Render one clip. With ``image``, that photo becomes the first frame and the model animates it."""
         from diffusers import UniPCMultistepScheduler
         from diffusers.utils import export_to_video
 
@@ -153,6 +235,7 @@ class VideoGenerator:
             # In low-memory mode the LoRA is fused into the weights; a new strength means reloading.
             self._pipe = None
             free_memory()
+        self._encode([prompt, settings.negative_prompt], settings.lora_scale)
         pipe = self.load(settings.lora_scale)
         if settings.flow_shift != self._flow_shift:
             pipe.scheduler = UniPCMultistepScheduler.from_config(
@@ -165,17 +248,32 @@ class VideoGenerator:
         seed = settings.seed if settings.seed is not None else random.randrange(2**31)
 
         started = time.time()
-        frames = pipe(
-            prompt=prompt,
-            negative_prompt=settings.negative_prompt,
-            height=settings.height,
-            width=settings.width,
-            num_frames=settings.num_frames,
-            num_inference_steps=settings.steps,
-            guidance_scale=settings.guidance,
-            generator=torch.Generator("cpu").manual_seed(seed),
-            output_type="np",
-        ).frames[0]
+        width, height = settings.width, settings.height
+        call = {
+            "prompt_embeds": self._padded(prompt),
+            "negative_prompt_embeds": self._padded(settings.negative_prompt),
+            "num_frames": settings.num_frames,
+            "num_inference_steps": settings.steps,
+            "guidance_scale": settings.guidance,
+            "generator": torch.Generator("cpu").manual_seed(seed),
+            # Sequential mode decodes after the video model is out of memory (see below).
+            "output_type": "latent" if self.sequential else "np",
+        }
+        if image is not None:
+            with Image.open(image) as photo:
+                photo = ImageOps.exif_transpose(photo).convert("RGB")
+            multiple = pipe.vae_scale_factor_spatial * pipe.transformer.config.patch_size[1]
+            width, height = fit_to_image(settings.width * settings.height, photo.size, multiple)
+            frames = self._image_pipeline(pipe)(image=photo, width=width, height=height, **call).frames
+        else:
+            frames = pipe(width=width, height=height, **call).frames
+        if self.sequential:
+            vae, processor = pipe.vae, pipe.video_processor
+            self._pipe = pipe = None  # free the video model's RAM before decoding (reloaded next time)
+            free_memory()
+            frames = decode_latents(vae, frames, processor)
+        else:
+            frames = frames[0]
 
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / f"{time.strftime('%Y%m%d-%H%M%S')}_{_slug(scene)}.mp4"
@@ -186,8 +284,11 @@ class VideoGenerator:
             "seed": seed,
             "base": self.base,
             "lora": str(self.lora) if self.lora else None,
+            "image": str(image) if image else None,
             "seconds": round(time.time() - started, 1),
             **{k: v for k, v in asdict(settings).items() if k not in ("seed", "negative_prompt")},
+            "width": width,
+            "height": height,
         }
         path.with_suffix(".json").write_text(json.dumps(info, indent=2, ensure_ascii=False))
         return path

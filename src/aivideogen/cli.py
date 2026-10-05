@@ -111,15 +111,38 @@ def cmd_train(args) -> None:
     print(f'\nDone. Her model: {final}\nTry: aivideogen generate "she waves at the camera" --lora {final}')
 
 
+ANIMATE_BASE = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+
+
+def _animate_base() -> str:
+    local = Path("models") / ANIMATE_BASE.split("/")[-1]
+    return str(local) if (local / "model_index.json").exists() else ANIMATE_BASE
+
+
 def cmd_generate(args) -> None:
     from aivideogen.generate import GenerationSettings, VideoGenerator, base_model_of, find_lora
+    from aivideogen.wan import resolve_device
 
-    lora = find_lora(args.lora)
-    if lora is None and not args.no_lora:
+    character = _character(args)
+    animating = args.command == "animate"
+    image = args.image
+    if animating and image is None:
+        image = character.reference_image
+        if image is None or not Path(image).exists():
+            raise SystemExit("No photo to animate: set reference_image in character.yaml or pass --image.")
+    # Animating uses her LoRA only when asked: it must have been trained on the same (5B) base model.
+    lora = None if args.no_lora or (animating and args.lora is None) else find_lora(args.lora)
+    if lora is None and not (args.no_lora or animating):
         raise SystemExit("No trained LoRA found under runs/. Train one first, pass --lora, or use --no-lora.")
-    if args.no_lora:
-        lora = None
-    base = args.base or (base_model_of(lora) if lora else None) or "Wan-AI/Wan2.1-T2V-14B-Diffusers"
+    base = args.base or (base_model_of(lora) if lora else None)
+    base = base or (_animate_base() if animating or image else "Wan-AI/Wan2.1-T2V-14B-Diffusers")
+
+    cpu = resolve_device(args.device).type == "cpu"
+    if cpu and args.width is None and args.height is None:
+        # A CPU renders roughly a 480p-sized, 2-second clip in tens of minutes; keep defaults in that range.
+        args.width, args.height = 640, 480
+        args.frames = args.frames or 49
+        args.steps = args.steps or 30
     settings = GenerationSettings.for_model(
         base,
         width=args.width,
@@ -133,13 +156,21 @@ def cmd_generate(args) -> None:
         lora_scale=args.lora_scale,
     )
     generator = VideoGenerator(
-        base, lora, _character(args), device=args.device, precision=args.precision, memory=args.memory
+        base, lora, character, device=args.device, precision=args.precision, memory=args.memory
     )
+    print(f"base: {base}" + (f"\nlora: {lora}" if lora else "") + (f"\nphoto: {image}" if image else ""))
     print(f"prompt: {generator.build_prompt(args.prompt)}")
     for i in range(args.count):
         if i and settings.seed is not None:
             settings.seed += 1
-        print(f"saved {generator.generate(args.prompt, settings, Path(args.out))}")
+        print(f"saved {generator.generate(args.prompt, settings, Path(args.out), image=image)}")
+
+
+def cmd_download(args) -> None:
+    from aivideogen.download import download_model
+
+    out = download_model(args.model, args.out, dtype=None if args.keep_fp32 else __import__("torch").bfloat16)
+    print(f"ready: {out}")
 
 
 def cmd_export(args) -> None:
@@ -281,31 +312,46 @@ def build_parser() -> argparse.ArgumentParser:
     )
     t.set_defaults(fn=cmd_train)
 
-    g = sub.add_parser("generate", help="make a video of her from a text prompt")
+    def with_generation(parser):
+        parser.add_argument("--image", type=Path, help="animate this photo (it becomes the first frame)")
+        parser.add_argument("--lora", type=Path, help="LoRA file or run dir (default: newest in runs/)")
+        parser.add_argument("--no-lora", action="store_true", help="use the plain base model")
+        parser.add_argument("--base", help="base model (default: the one the LoRA was trained on)")
+        parser.add_argument("--width", type=int)
+        parser.add_argument("--height", type=int)
+        parser.add_argument("--frames", type=int, help="number of frames (4k+1, e.g. 81 = 5s at 16fps)")
+        parser.add_argument("--fps", type=int)
+        parser.add_argument("--steps", type=int)
+        parser.add_argument("--guidance", type=float)
+        parser.add_argument("--flow-shift", type=float)
+        parser.add_argument("--lora-scale", type=float, default=1.0, help="how strongly to apply her LoRA")
+        parser.add_argument("--seed", type=int)
+        parser.add_argument("--count", type=int, default=1, help="number of videos")
+        parser.add_argument("--out", default="outputs")
+        parser.add_argument("--device", default="auto")
+        parser.add_argument("--precision", default="bf16", choices=["bf16", "fp16", "fp32"])
+        parser.add_argument(
+            "--memory",
+            default="auto",
+            choices=["auto", "gpu", "offload", "low", "sequential"],
+            help="low: fp8 + CPU offload (24 GB cards, 14B); sequential: one model in RAM at a time",
+        )
+        parser.set_defaults(fn=cmd_generate)
+        return parser
+
+    g = with_generation(sub.add_parser("generate", help="make a video of her from a text prompt"))
     g.add_argument("prompt", help='what she does, e.g. "Mika walks through a rainy street at night"')
-    g.add_argument("--lora", type=Path, help="LoRA file or run directory (default: newest run in runs/)")
-    g.add_argument("--no-lora", action="store_true", help="use the plain base model (for comparison)")
-    g.add_argument("--base", help="base model (default: the one the LoRA was trained on)")
-    g.add_argument("--width", type=int)
-    g.add_argument("--height", type=int)
-    g.add_argument("--frames", type=int, help="number of frames (4k+1, e.g. 81 = 5s at 16fps)")
-    g.add_argument("--fps", type=int)
-    g.add_argument("--steps", type=int)
-    g.add_argument("--guidance", type=float)
-    g.add_argument("--flow-shift", type=float)
-    g.add_argument("--lora-scale", type=float, default=1.0, help="how strongly to apply her LoRA")
-    g.add_argument("--seed", type=int)
-    g.add_argument("--count", type=int, default=1, help="number of videos")
-    g.add_argument("--out", default="outputs")
-    g.add_argument("--device", default="auto")
-    g.add_argument("--precision", default="bf16", choices=["bf16", "fp16", "fp32"])
-    g.add_argument(
-        "--memory",
-        default="auto",
-        choices=["auto", "gpu", "offload", "low"],
-        help="low = fp8 weights + CPU offload, for 24 GB cards with the 14B model",
+
+    an = with_generation(
+        sub.add_parser("animate", help="bring her profile photo to life (Wan 2.2 5B; works without a GPU)")
     )
-    g.set_defaults(fn=cmd_generate)
+    an.add_argument("prompt", help='how she moves, e.g. "she sips her coffee and smiles at the camera"')
+
+    dl = sub.add_parser("download", help="fetch a base model, stored in bf16 to save disk")
+    dl.add_argument("model", help="wan22-5b, wan21-1.3b, wan21-14b, or a Hugging Face repo id")
+    dl.add_argument("--out", type=Path, help="default: models/<repo name>")
+    dl.add_argument("--keep-fp32", action="store_true", help="keep original precision (twice the disk)")
+    dl.set_defaults(fn=cmd_download)
 
     e = sub.add_parser("export", help="export her LoRA for ComfyUI, or as a standalone merged model")
     e.add_argument("format", choices=["comfyui", "merged"])

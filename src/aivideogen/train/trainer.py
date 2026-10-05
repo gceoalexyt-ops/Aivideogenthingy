@@ -29,6 +29,7 @@ from aivideogen.wan import (
     DEFAULT_NEGATIVE_PROMPT,
     dtype_kwarg,
     free_memory,
+    load_text_encoder,
     make_scheduler,
     pad_embeds,
     resolve_device,
@@ -67,7 +68,7 @@ class Trainer:
     def _cache(self):
         """Encode the dataset (and prompts used later) with the VAE and text encoder, then free them."""
         from diffusers import AutoencoderKLWan
-        from transformers import AutoTokenizer, UMT5EncoderModel
+        from transformers import AutoTokenizer
 
         cfg = self.cfg
         samples = list_samples(cfg.data.dataset_dir)
@@ -91,7 +92,7 @@ class Trainer:
             self.device
         )
         tokenizer = AutoTokenizer.from_pretrained(base, subfolder="tokenizer")
-        text_encoder = UMT5EncoderModel.from_pretrained(base, subfolder="text_encoder", dtype=self.dtype)
+        text_encoder = load_text_encoder(base, self.dtype)
         text_pipe = text_encoding_pipeline(tokenizer, text_encoder.to(self.device))
 
         from diffusers import WanTransformer3DModel
@@ -176,7 +177,7 @@ class Trainer:
         sigmas = self._sigmas(x0.shape[0]).to(self.device)
         s = sigmas.view(-1, 1, 1, 1, 1)
         noisy = (1 - s) * x0 + s * noise
-        autocast = self.device.type == "cuda" and self.dtype != torch.float32
+        autocast = self.dtype != torch.float32  # also on CPU: bf16 autocast uses AMX where available
         with torch.autocast(self.device.type, dtype=self.dtype, enabled=autocast):
             pred = transformer(
                 hidden_states=noisy.to(self.dtype),

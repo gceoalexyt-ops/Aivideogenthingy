@@ -13,7 +13,8 @@ from pathlib import Path
 import torch
 
 
-def build_tiny_wan(out_dir: Path, vocabulary_texts: Iterable[str] = ()) -> Path:
+def build_tiny_wan(out_dir: Path, vocabulary_texts: Iterable[str] = (), image_to_video: bool = False) -> Path:
+    """``image_to_video`` builds the Wan 2.2 TI2V flavor, which can also animate a photo."""
     from diffusers import AutoencoderKLWan, UniPCMultistepScheduler, WanPipeline, WanTransformer3DModel
     from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, processors, trainers
     from transformers import PreTrainedTokenizerFast, UMT5Config, UMT5EncoderModel
@@ -74,7 +75,12 @@ def build_tiny_wan(out_dir: Path, vocabulary_texts: Iterable[str] = ()) -> Path:
         prediction_type="flow_prediction", use_flow_sigmas=True, num_train_timesteps=1000, flow_shift=3.0
     )
     pipe = WanPipeline(
-        tokenizer=tokenizer, text_encoder=text_encoder, vae=vae, scheduler=scheduler, transformer=transformer
+        tokenizer=tokenizer,
+        text_encoder=text_encoder,
+        vae=vae,
+        scheduler=scheduler,
+        transformer=transformer,
+        expand_timesteps=image_to_video,
     )
     out_dir = Path(out_dir)
     pipe.save_pretrained(out_dir)

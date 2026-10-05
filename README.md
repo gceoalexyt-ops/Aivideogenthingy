@@ -41,6 +41,25 @@ This runs every stage on a tiny, randomly-initialized Wan model and a cartoon st
 dataset, caching, training, saving her LoRA, reloading it, and rendering an mp4. It takes about a minute
 on a CPU. The video is abstract noise; it proves the plumbing works before you rent a GPU.
 
+## No GPU? Bring her photo to life on a CPU
+
+Wan 2.2 TI2V 5B can animate a photo: her profile picture becomes the first frame and the model makes her move.
+This works on a plain CPU. Modern Intel Xeons with AMX run the bf16 math several times faster than older chips.
+
+```bash
+pip install -e .
+aivideogen download wan22-5b     # ~34 GB download, stored compactly as ~19 GB (bf16 + fp8 text encoder)
+aivideogen animate "she sips her coffee, smiles and turns toward the camera"
+```
+
+The CPU defaults are a 480×640, 49-frame (about 2 s) clip with 30 steps. Expect roughly 40–60 minutes per clip on a
+4-core AMX Xeon; it is much faster on any recent NVIDIA GPU. With 16 GB of RAM it still fits: the text
+encoder and the video model never sit in memory together, and the video is decoded after the model is freed.
+Use `--frames 81` for longer clips and `--width/--height` for size (her photo's aspect ratio is kept).
+
+This animates her photo without training. The steps below train her own model, so you can put her into any
+scene from text alone.
+
 ## Train her real model
 
 You need an NVIDIA GPU, your own or rented (see [cloud GPUs](#cloud-gpus)). Pick a preset:
@@ -156,10 +175,11 @@ src/aivideogen/
   character.py, safety.py      her definition, prompt rewriting, minor-depiction guard
   dataset/                     shot list, image backends (qwen / replicate / mock), build, import, checks
   train/                       config, aspect buckets + latent/text cache, LoRA trainer
-  generate.py, export.py       video generation, ComfyUI / merged-model export
+  generate.py, export.py       video generation (text or photo), ComfyUI / merged-model export
+  download.py                  compact model downloads (bf16 + fp8 text encoder)
   webui.py, cli.py, tiny.py    Gradio UI, command line, tiny test model
 modal_app.py                   optional cloud-GPU runner
-tests/                         52 tests; full train→generate→export runs on the tiny model
+tests/                         60 tests; full train→generate→export runs on the tiny model
 ```
 
 ## Development
