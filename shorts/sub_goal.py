@@ -72,7 +72,7 @@ def render(E, V, N, lt, scene, count=SUBS):
     if "castle" not in _cache:
         _cache["castle"] = E.blocks_faces(castle_blocks())
     a = -0.35 + 0.06 * lt
-    cam = E.Cam.look((math.sin(a) * 13, 10.5, 8 - math.cos(a) * 13), (0, 0.6, 8.4))
+    cam = E.Cam.look((math.sin(a) * 9, 15.5, 8 - math.cos(a) * 9), (0, 0.0, 8.6))
     faces = list(E.TREE_FACES) + list(_cache["castle"])
     t0 = scene.w["every"]
     t1 = scene.w["we're"] + 0.3

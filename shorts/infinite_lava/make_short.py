@@ -181,8 +181,8 @@ def main():
 
     T = {
         "lava_whip": at("hook", "lava", -0.15),
-        "block": at("block", "block", -0.1),
-        "lava": at("block", "lava"),
+        "block": S["block"].start + 0.05,
+        "lava": at("block", "block"),
         "drip": at("drip", "dripstone", -0.1),
         "cauldron": at("cauldron", "cauldron", -0.1),
         "fill0": S["fill"].start,
@@ -274,7 +274,7 @@ def main():
                     pills.append(("INFINITE LAVA?", (210, 90, 20), (W / 2, 470), t - T["lava_whip"] - 0.15, 60))
             elif name in ("block", "drip", "cauldron", "fill"):
                 a = 0.9 * (t - S["block"].start) / max(1.0, S["fill"].start + S["fill"].D - S["block"].start) - 0.45
-                cam = E.Cam.look((0.5 + 4.2 * math.sin(a), 2.6, 0.5 - 4.2 * math.cos(a)), (0.5, 1.8, 0.5))
+                cam = E.Cam.look((0.5 + 6.3 * math.sin(a), 3.0, 0.5 - 6.3 * math.cos(a)), (0.5, 2.3, 0.5))
                 faces += farm(0, 0, t, level, pop)
                 if name == "fill":
                     drips.append((0, 0, 0.55, 0.0, level))
