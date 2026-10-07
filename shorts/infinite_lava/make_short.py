@@ -5,13 +5,14 @@ A lava source on top of a block, pointed dripstone hanging under it, and a cauld
 through the dripstone and slowly fills the cauldron, forever. Reuses the first-person renderer from
 ../enderman and the mob/HUD helpers from ../name_tags; the ending comes from ../sub_goal.py.
 
-    SUBS=19 python shorts/infinite_lava/make_short.py   # -> shorts/infinite_lava/infinite_lava_short.mp4
+    SUBS=35 python shorts/infinite_lava/make_short.py   # -> shorts/infinite_lava/infinite_lava_short.mp4
 """
 
 from __future__ import annotations
 
 import importlib.util
 import math
+import os
 import subprocess
 from pathlib import Path
 
@@ -28,6 +29,7 @@ def _load(name, path):
     return mod
 
 
+os.environ.setdefault("SUBS", "35")  # current subscriber count for the sub-goal ending
 NT = _load("name_tags", HERE.parent / "name_tags" / "make_short.py")
 SG = _load("sub_goal", HERE.parent / "sub_goal.py")
 E, N, V = NT.E, NT.N, NT.V
