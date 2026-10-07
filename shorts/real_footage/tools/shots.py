@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from shotlib import (PLAYER, WIN, Recorder, camera_path, cmd, define, orbit, reload, run, setup_camera,
                      sleep, stop, write_pack, xdo)
 
-OUT = sys.argv[1]
+OUT = sys.argv[1] if len(sys.argv) > 1 else "."
 TPS = 20
 S = "stone"
 

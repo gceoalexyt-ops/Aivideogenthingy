@@ -93,6 +93,7 @@ def setup_camera(x, y, z, yaw, pitch):
 
 
 def define(name, events):
+    name = name.lower()  # function ids must be lowercase
     lines = []
     for t, c in sorted(events, key=lambda e: e[0]):
         lines.append(f"execute if score #t cam matches {t} run {c.lstrip('/')}")
@@ -105,6 +106,7 @@ def reload():
 
 
 def run(name):
+    name = name.lower()
     cmd("scoreboard players set #on cam 0", "scoreboard players set #t cam 0",
         f'data modify storage shots:cur name set value "{name}"', "scoreboard players set #on cam 1")
 
