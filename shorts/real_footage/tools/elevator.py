@@ -220,8 +220,16 @@ def g_air_refill():
     cmd("gamemode spectator " + PLAYER)
 
 
-def diamond_layout(n, inner=11):
-    """Positions (dx, dy, dz) for exactly n blocks: the neatest box that fits, else a stepped pile."""
+def diamond_layout(n, inner=11, flat=False):
+    """Positions (dx, dy, dz) for exactly n blocks: the neatest box that fits, else a stepped pile.
+
+    flat: a single layer (every block visible from above) when n fits as w x d within 10 x 10.
+    """
+    if flat:
+        sizes = [(w, n // w) for w in range(1, inner) if n % w == 0 and n // w < inner]
+        if sizes:
+            w, d = min(sizes, key=lambda s: abs(s[0] - s[1]))
+            return [(i, 0, j) for i in range(w) for j in range(d)]
     for h in (3, 2, 4, 1, 5, 6):
         if n % h:
             continue
@@ -248,8 +256,8 @@ def diamond_layout(n, inner=11):
     return pos
 
 
-def h_castle(n):
-    x, z = 3800, 0
+def build_castle(x, z, n, flat=False):
+    """Stone-brick castle with exactly n diamond blocks inside, verified in game."""
     prepare(x + 6, z + 6, 26)
     sb = "stone_bricks"
     c = [f"fill {x} 20 {z} {x + 12} 20 {z + 12} {sb}",
@@ -265,7 +273,7 @@ def h_castle(n):
           f"setblock {x + 5} 24 {z + 12} stone_brick_stairs[facing=east,half=top]",
           f"setblock {x + 7} 24 {z + 12} stone_brick_stairs[facing=west,half=top]",
           f"fill {x + 1} 21 {z + 1} {x + 11} 25 {z + 11} air"]
-    pos = diamond_layout(n)
+    pos = diamond_layout(n, flat=flat)
     w = max(p[0] for p in pos) + 1
     d = max(p[2] for p in pos) + 1
     ox, oz = x + 1 + (11 - w) // 2, z + 1 + (11 - d) // 2
@@ -278,6 +286,11 @@ def h_castle(n):
     print(f"castle diamond blocks: {count}", flush=True)
     if count != n:
         sys.exit(f"diamond count {count} != {n}")
+
+
+def h_castle(n):
+    x, z = 3800, 0
+    build_castle(x, z, n)
     cx, cz = x + 6.5, z + 6.5
     ev = camera_path([(0, cx, 24, z + 27, 180, 4), (8 * TPS, cx, 36, z + 17, 180, 42),
                       (13 * TPS, cx, 32.5, cz + 2.2, 180, 72), (18 * TPS, cx, 30.5, cz + 1.2, 180, 82)])
