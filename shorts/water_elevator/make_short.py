@@ -23,7 +23,7 @@ from PIL import Image
 
 HERE = Path(__file__).resolve().parent
 FOOT = HERE / "footage"
-SUBS = int(os.environ.get("SUBS", "60"))
+SUBS = int(os.environ.get("SUBS", "170"))
 OUT = HERE / "water_elevator_short.mp4"
 
 
