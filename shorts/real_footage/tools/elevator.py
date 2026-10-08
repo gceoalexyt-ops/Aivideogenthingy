@@ -243,16 +243,27 @@ def diamond_layout(n, inner=11, flat=False):
         if best and abs(best[0] - best[1]) <= 2:
             w, d = best
             return [(i, y, j) for y in range(h) for i in range(w) for j in range(d)]
-    side = math.ceil(math.sqrt(n / 2)) + 1
-    pos, y = [], 0
-    while len(pos) < n:
-        s = max(1, side - y)
-        off = (side - s) / 2
-        for i in range(s):
-            for j in range(s):
-                if len(pos) < n:
-                    pos.append((round(i + off), y, round(j + off)))
-        y += 1
+    # Stepped pile of centred squares, largest first (170 = 11x11 + 7x7); the top layer may be partial
+    layers, rem, side = [], n, inner
+    while rem:
+        side = min(side, math.isqrt(rem))
+        if side == 0 or (layers and side >= layers[-1]):
+            side = (layers[-1] - 1) if layers else 1
+            layers.append(-rem)  # partial layer of rem blocks
+            break
+        layers.append(side)
+        rem -= side * side
+    base = layers[0] if layers[0] > 0 else inner
+    pos = []
+    for y, s_ in enumerate(layers):
+        if s_ > 0:
+            off = (base - s_) // 2
+            pos += [(i + off, y, j + off) for i in range(s_) for j in range(s_)]
+        else:
+            prev = layers[y - 1] if y else base
+            w = prev - 1 if prev > 2 else max(1, prev)
+            off = (base - w) // 2
+            pos += [(off + k % w, y, off + k // w) for k in range(-s_)]
     return pos
 
 
@@ -278,8 +289,10 @@ def build_castle(x, z, n, flat=False):
     d = max(p[2] for p in pos) + 1
     ox, oz = x + 1 + (11 - w) // 2, z + 1 + (11 - d) // 2
     c += [f"setblock {ox + i} {21 + y} {oz + j} diamond_block" for i, y, j in pos]
+    floor = {(ox + i, oz + j) for i, y, j in pos if y == 0}
     for lx, lz in ((x + 1, z + 1), (x + 11, z + 1), (x + 1, z + 11), (x + 11, z + 11)):
-        c.append(f"setblock {lx} 21 {lz} lantern")
+        if (lx, lz) not in floor:  # a big pile fills the corners; never overwrite a diamond
+            c.append(f"setblock {lx} 21 {lz} lantern")
     cmd(*c)
     sleep(2)
     count = count_blocks(x, z, "diamond_block")
