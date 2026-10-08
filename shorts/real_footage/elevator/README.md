@@ -16,6 +16,10 @@ of each clip.
 | `G_air_refill.mp4` (14.2 s) | **HUD visible.** First person diving into a sea-lantern-lit pool with a bubble column ahead. The air bar drains 8 → 2 bubbles (0–8.7 s) and the player swims forward (real W key) from **6.5 s**. They enter the column at **~8.7 s** and the air bar refills (9.5–11 s) with no health lost. |
 | `H_castle_60.mp4` (18.6 s) | Stone-brick castle with **exactly 60 diamond blocks** inside (a 5×4×3 pile, counted in game). The camera cranes from the gate (0 s) up over the wall (8 s) and down to the diamonds (13 s+). No towers are in frame for the final 5 s. |
 
+**`H_castle_170.mp4` (18.6 s, HUD hidden):** the same crane as `H_castle_60.mp4` (gate, over the wall at 8 s,
+down to the diamonds from 13 s, no towers at the end), re-shot for the new sub goal with **exactly 170 diamond
+blocks**, counted in game. They're laid out as an 11x11 layer with a centred 7x7 layer on top (121 + 49).
+
 ## Re-shooting
 
 `../tools/elevator.py OUTDIR [A B C D E F G H] [--diamonds N]` reshoots any clip.
