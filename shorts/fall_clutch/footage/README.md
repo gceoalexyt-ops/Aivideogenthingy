@@ -23,10 +23,11 @@ is visible below.
 | `D_slime_block.mp4` (8.8 s) | 1.5 s | Slime block already on the ground (visible below) | ~4.2 s, **bounces** back up and comes down again by the end | **20 / 20** |
 | `E_cobweb.mp4` (6.8 s) | 1.5 s | 3x3 patch of cobwebs, 2 high, on a stone pad (single webs are invisible edge-on from straight above) | ~4.2 s, into the webs | **20 / 20** |
 | `F_powder_snow.mp4` (6.8 s) | 1.5 s | Powder snow (2 deep) already on the ground | ~4.2 s, sinks into the snow (frost overlay) | **20 / 20** |
-| `H_castle_60.mp4` (18.9 s, HUD hidden) | Sunset. Starts low, looking west at the castle against the setting sun, circles round while rising (0–12 s), then cranes up to nearly overhead (12–18.9 s) | | | |
+| `H_castle_170.mp4` (18.9 s, HUD hidden) | Sunset. Starts low, looking west at the castle against the setting sun, circles round while rising (0–12 s), then cranes up to nearly overhead (12–18.9 s) | | | |
 
-**H:** exactly **60 diamond blocks**, counted in game, laid out as one flat 6x10 layer so all 60
-are countable at the end.
+**H:** exactly **170 diamond blocks** (the new sub goal), counted in game. 170 is too many for one
+layer in the 11x11 courtyard, so they're an 11x11 layer with a centred 7x7 layer on top (121 + 49),
+seen from nearly overhead at the end. Layouts work for any count up to 241.
 
 **Skipped: G_boat.** In two takes, landing on a placed oak boat did **not** cancel fall damage
 in 26.3: the player died ("fell from a high place") both times. No boat clip is included.
