@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import json
 import math
 import os
 import subprocess
@@ -37,6 +38,7 @@ PURPLE = (190, 140, 255)
 MAX = {"warden": 500.0, "wither": 300.0}
 COL = {"warden": TEAL, "wither": PURPLE}
 LAG = 0.1
+MAX_SPEED = float(os.environ.get("MAX_SPEED", "5"))
 
 
 def load(path):
@@ -62,7 +64,7 @@ def at(rows, t):
     return rows[-1][1], rows[-1][2]
 
 
-def big_hits(rows, thresh=18.0):
+def big_hits(rows, thresh=15.0):
     """Clip times where either boss loses a big chunk of health quickly."""
     hits, last = [], -9
     for a, b in zip(rows, rows[1:]):
@@ -84,15 +86,16 @@ def build_beats(rows, ev):
     li = 1 - wi
     end_hp = at(rows, final + 0.3)[wi]
     close_hp = at(rows, final - 1.4)[li]
-    half = 0.8 + (final - 0.8) * 0.45
+    p2 = ev.get("wither_phase2")
+    fs = ev.get("fight_start", 0.8)
+    half = fs + (final - fs) * 0.45
     hw, hwi = at(rows, half)
     ahead = "Warden" if hw / MAX["warden"] >= hwi / MAX["wither"] else "Wither"
-    p2 = ev.get("wither_phase2")
-    beats = [
-        dict(name="hook", text="The Wither versus the Warden. Comment who you think wins!", clip="A_lineup", c0=0.0, c1=None),
-        dict(name="start", text="Fight! The Warden has five hundred health. The Wither has three hundred, and it can fly.",
-             clip="B_fight", c0=0.8, c1=half if not p2 or p2 > half + 2 else max(1.5, p2 - 2.5)),
-    ]  # fmt: skip
+    beats = [dict(name="hook", text="The Wither versus the Warden. Comment who you think wins!", clip="A_lineup", c0=0.0, c1=None)]
+    if fs > 4:
+        beats.append(dict(name="charge", text="The Wither spawns, and charges up its power...", clip="B_fight", c0=1.0, c1=fs))
+    beats.append(dict(name="start", text="Fight! The Warden has five hundred health. The Wither has three hundred, and it can fly.",
+                      clip="B_fight", c0=fs, c1=min(fs + 8.0, half) if not p2 else max(fs + 1.5, p2 - 2.5)))  # fmt: skip
     if p2 and p2 < final - 5:
         beats.append(dict(name="phase2", text="The Wither drops to half health, and its armor turns on!",
                           clip="B_fight", c0=None, c1=min(final - 4.0, p2 + 3.0), alert=p2))  # fmt: skip
@@ -106,6 +109,11 @@ def build_beats(rows, ev):
         dict(name="guess", text="Did you guess right? Tell me in the comments.", clip="C_aftermath", c0=None, c1=None),
         dict(name="subs", text=SG.line(SUBS), clip=f"D_castle_{SUBS}", c0=7.0, c1=None),
     ]  # fmt: skip
+    notes = FOOT / "narration.json"
+    if notes.exists():  # per-fight lines, written from the verified moments in footage/README.md
+        over = json.loads(notes.read_text())
+        for b in beats:
+            b["text"] = over.get(b["name"], b["text"])
     return beats, final, winner
 
 
@@ -139,7 +147,7 @@ def main():
         c0 = b["c0"] if b["c0"] is not None else (c_after or 0.0)
         if b["c1"] is not None:
             span = max(0.3, b["c1"] - c0)
-            D = max(D, span / 3.0)
+            D = max(D, span / MAX_SPEED)
             speed = span / D
         else:
             speed = max(1.0, (clen - c0) / D) if b["name"] == "hook" else 1.0
