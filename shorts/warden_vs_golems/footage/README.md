@@ -1,30 +1,40 @@
-# 1 Warden vs 10 Iron Golems, v2 (glass arena)
+# 1 Warden vs 10 Iron Golems, v3 (smooth)
 
-A re-shoot of `../` in a camera-friendly arena: 40x40 deepslate floor with **glass walls**, and
-a fight camera that can't be blocked. The setup is otherwise the same: Minecraft Java 26.3, the
-Frontgate account, the Fabulously Optimized client against an unmodded vanilla server. Clips are
-720x1280, 30 fps, h264 (CRF 20), no audio, HUD hidden. `../D_castle_187.mp4` still applies.
+The v2 setup (40x40 glass arena, tracking camera, same honest rules) re-recorded with
+**smooth capture**. This is a new real fight, so its result is its own. Clips are 720x1280,
+30 fps, h264 (CRF 20), no audio, HUD hidden. `../D_castle_187.mp4` still applies.
 
-## Result: the golems win, 4 of 10 left
+**What changed for smoothness:**
+- **Slow-motion capture:** the game ran at quarter speed (`/tick rate 5`) while recording, and
+  each clip was then sped back up 4x to real game speed. Game logic and the fight are unchanged,
+  just slower in real time, but every output frame has 4x more rendering behind it.
+- **Smoother camera entity:** the camera rides an invisible armor stand, whose position the client
+  interpolates every frame. The old item-display camera stepped once per game tick.
+
+Measured with `../../tools/shake.py` (duplicate frames are frames where the picture froze while
+the camera was moving):
+
+| Clip | v2 duplicate frames | v3 duplicate frames | v2 jitter p95 | v3 jitter p95 |
+| --- | --- | --- | --- | --- |
+| A_lineup | 25.6% | **0.0%** | 13.2 px | **3.9 px** |
+| B_fight | 4.6% | **1.6%** | 4.0 px | **2.8 px** |
+
+## Result: the golems win, 3 of 10 left
 
 | | Start | End |
 | --- | --- | --- |
-| Warden health | 500 | **0** (dies at **30.6 s** in `B_fight`) |
-| Golems alive | 10 | **4** |
-| Golems' combined health | 1000 | **310** (three at 100, one at 10) |
+| Warden health | 500 | **0** (dies at **32.8 s** in `B_fight`) |
+| Golems alive | 10 | **3** |
+| Golems' combined health | 1000 | **270** (100, 100, 70) |
 
-The Warden killed 6 golems, one about every 3.8 s (8.0, 11.8, 15.6, 19.3, 23.1, 26.8 s). It went
-from 62.5 to 0 health in the last 3.8 s.
-
-**Same honest rules:** no effects, damage or kill commands during the fight. The Warden got the
-dig cooldown a naturally emerged Warden has (otherwise a `/summon`'d one burrows away within
-seconds), and NoAI held everyone still for the lineup only, released 1.0 s into `B_fight`.
-
-## Clips
+The Warden killed 7 golems, about one every 3.8 s (8.2, 12.0, 15.8, 19.6, 23.4, 27.2, 31.0 s).
+After the 7th kill it had 9.5 health left and died 1.8 s later. Same rules as before: no effects,
+damage or kill commands during the fight, the Warden got its natural dig cooldown, and NoAI was
+used for the lineup only, released 1.0 s into `B_fight`.
 
 | Clip | What happens |
 | --- | --- |
-| `A_lineup.mp4` (9.7 s) | Everyone frozen: the camera starts high behind the line of 10 golems, glides over them and ends facing the Warden. |
-| `B_fight.mp4` (33.9 s, one continuous take) | AI released at **1.0 s**. Golem deaths at 8.0 / 11.8 / 15.6 / 19.3 / 23.1 / 26.8 s, Warden death at **30.6 s** (near the west glass wall), then 3 s of the survivors. Each tick the camera aims at the midpoint of the Warden and the golems within 7 blocks of it, eases towards a spot 11 blocks south and ~15 up (about 55° down), and is clamped inside the arena. Frames at every death were checked: the Warden and the golems on it are in frame each time. |
-| `B_fight_telemetry.csv` | Every 0.25 s: `clip_time_s, warden_health, golems_alive, golems_total_health, event` (`golem_death` / `warden_death` on the reading where first seen). Clip time counts from the start of `B_fight.mp4`; server readings can lag the picture by up to ~0.3 s. |
-| `C_aftermath.mp4` (7.7 s) | Slow orbit from above the wall line around the 4 survivors. |
+| `A_lineup.mp4` (9.6 s) | Everyone frozen: high behind the line of golems, gliding over them to face the Warden. |
+| `B_fight.mp4` (35.9 s, one continuous take) | AI released at **1.0 s**. Golem deaths at the times above, Warden death at **32.8 s** (near the north glass wall), then 3 s of the survivors. Frames at every death were checked; the action is in frame each time. |
+| `B_fight_telemetry.csv` | Every ~0.06 s of game time: `clip_time_s, warden_health, golems_alive, golems_total_health, event`. Clip time is game time from the start of `B_fight.mp4` (it already accounts for the 4x retiming); readings can lag the picture by up to ~0.1 s. |
+| `C_aftermath.mp4` (7.4 s) | Slow orbit from above the wall line around the 3 survivors. |

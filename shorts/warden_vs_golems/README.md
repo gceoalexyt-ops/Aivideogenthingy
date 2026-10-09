@@ -1,8 +1,10 @@
 # Short: 1 Warden vs 10 Iron Golems (real, unrigged fight)
 
-`warden_short.mp4`: 34.7 s, 1080×1920. It's cut from a real fight in Minecraft Java Edition on the
+`warden_short.mp4`: 35.4 s, 1080×1920. It's cut from a real fight in Minecraft Java Edition on the
 channel's account: vanilla server, vanilla AI, and no effects, damage or kill commands
-(see `footage/README.md`). **Result: the iron golems win, 4 of 10 survive.** The Warden killed 6, about one every 3.8 s.
+(see `footage/README.md`). **Result: the iron golems win, 3 of 10 survive.** The Warden killed 7, about one every 3.8 s, and had 9.5 health left after its 7th kill.
+
+This is the smooth v3 take. It was recorded at quarter game speed and retimed 4×, with an interpolated camera, so there are almost no dropped frames. It's a new real fight, so it has its own result.
 
 The fight's telemetry (`footage/B_fight_telemetry.csv`) drives the narration, the Warden health
 bar, the golem counter, the speed ramps (up to 2.6×) and the slow-motion finish. If the fight is
@@ -12,7 +14,7 @@ re-shot, the video re-renders with the new real result.
 |---|---|
 | Hook | Lineup with "1 WARDEN VS 10 IRON GOLEMS" and "Comment who you think wins!" |
 | Fight | Live health bar, 10 golem icons crossed off with a "-1 GOLEM" pop per death, speed tags |
-| Climax | "Four golems left, and the Warden has 57 health!", then slow-mo, flash and shake on the kill |
+| Climax | "Three golems left, and the Warden has 10 health!", then slow-mo, flash and shake on the kill |
 | Verdict | "IRON GOLEMS WIN", then "Did you guess right?" |
 | Sub goal | Castle with 187 diamond blocks, counted in game |
 
