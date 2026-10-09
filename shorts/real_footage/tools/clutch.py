@@ -216,7 +216,7 @@ def orbit_pose(cx, cy, cz, ang, r, h):
     return x, cy + h, z, yaw, math.degrees(math.atan2(h, r))
 
 
-def h_castle(n):
+def h_castle_named(n, name, final_overhead=False):
     x, z = 5300, 0
     build_castle(x, z, n, flat=True)  # one layer, so every diamond block can be counted from above
     cmd("time set 11900")  # the sun is setting in the west
@@ -225,9 +225,16 @@ def h_castle(n):
     # then crane up to nearly overhead so all the diamonds are in view at the end.
     keys = [(0, *orbit_pose(cx, 21.5, cz, 95, 24, 6)), (6 * TPS, *orbit_pose(cx, 21.5, cz, 150, 20, 12)),
             (12 * TPS, *orbit_pose(cx, 21.5, cz, 215, 16, 18)), (18 * TPS, cx - 2.5, 41, cz, -90, 82)]
+    if final_overhead:
+        # End lower and straight down over the pile, holding the last 3 s, so no tower is in frame
+        keys = keys[:3] + [(15 * TPS, cx + 0.5, 36, cz, -90, 89), (18 * TPS, cx + 0.5, 35.5, cz, -90, 89.5)]
     set_gui(True)
-    elevator.shoot("H_castle_60" if n == 60 else f"H_castle_{n}", camera_path(keys), 18.6)
+    elevator.shoot(name, camera_path(keys), 18.6)
     cmd("time set 6000")
+
+
+def h_castle(n):
+    h_castle_named(n, "H_castle_60" if n == 60 else f"H_castle_{n}")
 
 
 SHOTS = {"A": a_freefall_hook, "B": b_splat, "C": c_water_bucket, "D": d_slime_block, "E": e_cobweb,
