@@ -20,6 +20,7 @@ def clip(name):
 
 
 def area(x, z, r=40):
+    x, z = int(x), int(z)  # forceload takes block coordinates, not decimals
     cmd(f"forceload add {x - r} {z - r} {x + r} {z + r}")
 
 

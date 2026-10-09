@@ -23,7 +23,7 @@ from shots import TPS, area, common
 from clutch import orbit_pose
 
 LOG = os.path.join(SERVER, "logs", "latest.log")
-AX, AZ, SIZE = 6000, 0, 30  # arena floor x..x+29, z..z+29 at y=20
+AX, AZ, SIZE = 6100, 0, 40  # arena floor x..x+39, z..z+39 at y=20 (v2: bigger, glass walls)
 CX, CZ = AX + SIZE / 2, AZ + SIZE / 2
 OUT = "."
 
@@ -44,17 +44,10 @@ def arena():
         f"fill {x0 - 6} 20 {z0 - 6} {x1 + 6} 20 {z1 + 6} grass_block",
         f"fill {AX} 20 {AZ} {AX + SIZE - 1} 20 {AZ + SIZE - 1} polished_deepslate",
         f"fill {AX + 2} 20 {AZ + 2} {AX + SIZE - 3} 20 {AZ + SIZE - 3} deepslate_tiles",
-        f"fill {x0} 20 {z0} {x1} 25 {z1} deepslate_bricks hollow",
-        f"fill {AX} 21 {AZ} {AX + SIZE - 1} 25 {AZ + SIZE - 1} air",
-        f"fill {AX} 26 {AZ} {AX + SIZE - 1} 26 {AZ + SIZE - 1} air",  # no roof: keep the arena open to the camera
-        f"fill {x0} 26 {z0} {x1} 26 {z0} polished_blackstone_brick_wall",
-        f"fill {x0} 26 {z1} {x1} 26 {z1} polished_blackstone_brick_wall",
-        f"fill {x0} 26 {z0} {x0} 26 {z1} polished_blackstone_brick_wall",
-        f"fill {x1} 26 {z0} {x1} 26 {z1} polished_blackstone_brick_wall")
-    # Lanterns on the walls so the arena reads well on camera
-    for i in range(3, SIZE, 6):
-        cmd(f"setblock {AX + i} 24 {AZ} lantern", f"setblock {AX + i} 24 {AZ + SIZE - 1} lantern",
-            f"setblock {AX} 24 {AZ + i} lantern", f"setblock {AX + SIZE - 1} 24 {AZ + i} lantern")
+        f"fill {x0} 20 {z0} {x1} 25 {z1} glass hollow",  # glass walls: nothing can block the camera
+        f"fill {AX} 20 {AZ} {AX + SIZE - 1} 20 {AZ + SIZE - 1} polished_deepslate",
+        f"fill {AX + 2} 20 {AZ + 2} {AX + SIZE - 3} 20 {AZ + SIZE - 3} deepslate_tiles",
+        f"fill {AX} 21 {AZ} {AX + SIZE - 1} 25 {AZ + SIZE - 1} air")
     cmd("kill @e[type=item]", "kill @e[type=iron_golem]", "kill @e[type=warden]", "kill @e[type=experience_orb]")
 
 
@@ -66,7 +59,7 @@ def lineup_positions(n):
         row, col = divmod(k, per_row)
         cnt = min(per_row, n - row * per_row)
         x = CX - (cnt - 1) * 1.25 + col * 2.5
-        z = AZ + SIZE - 8 - row * 2.6
+        z = AZ + 28 - row * 2.6
         pos.append((x, z))
     return pos
 
@@ -75,7 +68,7 @@ def spawn(n, frozen):
     ai = "1b" if frozen else "0b"
     # A Warden from /summon lacks the dig cooldown a naturally emerged one gets, so it would burrow away
     # within seconds of a calm start. Give it that cooldown (no effect on health or damage).
-    cmd(f"summon warden {CX} 21 {AZ + 7} {{NoAI:{ai},PersistenceRequired:1b,Rotation:[0f,0f],Tags:[\"fighter\"],"
+    cmd(f"summon warden {CX} 21 {AZ + 13} {{NoAI:{ai},PersistenceRequired:1b,Rotation:[0f,0f],Tags:[\"fighter\"],"
         f"Brain:{{memories:{{\"minecraft:dig_cooldown\":{{value:{{}},ttl:1200000L}}}}}}}}")
     for x, z in lineup_positions(n):
         cmd(f"summon iron_golem {x:.2f} 21 {z:.2f} {{NoAI:{ai},PersistenceRequired:1b,Rotation:[180f,0f],"
@@ -149,20 +142,55 @@ def shoot(n, diamonds, castle=True):
     sleep(2)
 
     # A: lineup, camera glides from behind the golem ranks over to the Warden
-    keys = [(0, CX + 9, 29.5, AZ + SIZE + 4, 160, 26), (4 * TPS, CX + 4, 28, CZ + 4, 195, 30),
-            (9 * TPS + 10, CX - 1.5, 24.5, AZ + 13, 180, 8)]
+    keys = [(0, CX + 9, 29.5, AZ + SIZE - 3, 160, 26), (4 * TPS, CX + 4, 28, AZ + 26, 195, 30),
+            (9 * TPS + 10, CX - 1.5, 24.5, AZ + 19, 180, 8)]
     elevator.shoot("A_lineup", camera_path(keys), 9.5)
 
-    # B: the fight. Camera pivots around the Warden (follows it every tick, interpolated client side).
-    cmd("kill @e[tag=pivot]", f"summon marker {CX} 21 {AZ + 5} {{Tags:[\"pivot\"],Rotation:[180f,0f]}}")
-    track = ['execute as @e[tag=pivot,limit=1] rotated as @s positioned as @e[type=warden,limit=1] '
-             'run tp @s ~ ~ ~ ~0.25 0',
-             'execute as @e[tag=pivot,limit=1] at @s run tp @e[tag=cam,limit=1] ^ ^12 ^-10 '
-             'facing entity @e[type=warden,limit=1] feet']
+    # B: the fight. Each tick the camera aims at the midpoint of the Warden (weight 2) and the golems within
+    # 7 blocks of it, eases towards a spot 11 blocks south and 16 up, and is clamped inside the arena.
     from shotlib import FN
-    open(os.path.join(FN, "shot", "track.mcfunction"), "w").write("\n".join(track) + "\n")
+    lo_x, hi_x, lo_z, hi_z = (AX + 1) * 100, (AX + SIZE - 1) * 100, (AZ + 1) * 100, (AZ + SIZE - 1) * 100
+    f = lambda name, lines: open(os.path.join(FN, "shot", name + ".mcfunction"), "w").write("\n".join(lines) + "\n")
+    f("addg", ["execute store result score #tx cam run data get entity @s Pos[0] 100",
+               "execute store result score #tz cam run data get entity @s Pos[2] 100",
+               "scoreboard players operation #gx cam += #tx cam", "scoreboard players operation #gz cam += #tz cam",
+               "scoreboard players add #n cam 1"])
+    f("mid", ["execute store result score #mx cam run data get entity @e[type=warden,limit=1] Pos[0] 200",
+              "execute store result score #mz cam run data get entity @e[type=warden,limit=1] Pos[2] 200",
+              "scoreboard players set #n cam 2", "scoreboard players set #gx cam 0", "scoreboard players set #gz cam 0",
+              "execute at @e[type=warden,limit=1] as @e[type=iron_golem,distance=..7] run function shots:shot/addg",
+              "scoreboard players operation #mx cam += #gx cam", "scoreboard players operation #mz cam += #gz cam",
+              "scoreboard players operation #mx cam /= #n cam", "scoreboard players operation #mz cam /= #n cam"])
+    f("track", ["execute if entity @e[type=warden] run function shots:shot/mid",
+                # target camera spot, clamped to the arena interior
+                "scoreboard players operation #tcx cam = #mx cam",
+                "scoreboard players operation #tcz cam = #mz cam", "scoreboard players add #tcz cam 1100",
+                f"execute if score #tcx cam matches ..{lo_x} run scoreboard players set #tcx cam {lo_x}",
+                f"execute if score #tcx cam matches {hi_x}.. run scoreboard players set #tcx cam {hi_x}",
+                f"execute if score #tcz cam matches ..{lo_z} run scoreboard players set #tcz cam {lo_z}",
+                f"execute if score #tcz cam matches {hi_z}.. run scoreboard players set #tcz cam {hi_z}",
+                # ease camera and look-at point towards their targets
+                "scoreboard players operation #d cam = #tcx cam", "scoreboard players operation #d cam -= #cx cam",
+                "scoreboard players operation #d cam /= #k cam", "scoreboard players operation #cx cam += #d cam",
+                "scoreboard players operation #d cam = #tcz cam", "scoreboard players operation #d cam -= #cz cam",
+                "scoreboard players operation #d cam /= #k cam", "scoreboard players operation #cz cam += #d cam",
+                "scoreboard players operation #d cam = #mx cam", "scoreboard players operation #d cam -= #fx cam",
+                "scoreboard players operation #d cam /= #kf cam", "scoreboard players operation #fx cam += #d cam",
+                "scoreboard players operation #d cam = #mz cam", "scoreboard players operation #d cam -= #fz cam",
+                "scoreboard players operation #d cam /= #kf cam", "scoreboard players operation #fz cam += #d cam",
+                "execute store result storage shots:cam x double 0.01 run scoreboard players get #cx cam",
+                "execute store result storage shots:cam z double 0.01 run scoreboard players get #cz cam",
+                "execute store result storage shots:cam fx double 0.01 run scoreboard players get #fx cam",
+                "execute store result storage shots:cam fz double 0.01 run scoreboard players get #fz cam",
+                "function shots:shot/camtp with storage shots:cam"])
+    f("camtp", ["$tp @e[tag=cam,limit=1] $(x) 36.5 $(z) facing $(fx) 21.6 $(fz)"])
+    wx, wz = int(CX * 100), int((AZ + 13) * 100)
+    cmd("scoreboard players set #k cam 10", "scoreboard players set #kf cam 6",
+        f"scoreboard players set #mx cam {wx}", f"scoreboard players set #mz cam {wz}",
+        f"scoreboard players set #fx cam {wx}", f"scoreboard players set #fz cam {wz}",
+        f"scoreboard players set #cx cam {wx}", f"scoreboard players set #cz cam {wz + 1100}")
     reload()
-    cmd("data merge entity @e[tag=cam,limit=1] {teleport_duration:3}")
+    cmd("data merge entity @e[tag=cam,limit=1] {teleport_duration:2}")
     sleep(1)
     rows, events = [], []
     tele = os.path.join(OUT, "B_fight_telemetry.csv")
@@ -220,7 +248,7 @@ def shoot(n, diamonds, castle=True):
         tz = sum(float(p[2]) for p in pts) / len(pts)
     else:
         tx, tz = CX, CZ
-    tx, tz = min(max(tx, AX + 6), AX + SIZE - 6), min(max(tz, AZ + 6), AZ + SIZE - 6)
+    tx, tz = min(max(tx, AX + 9), AX + SIZE - 9), min(max(tz, AZ + 9), AZ + SIZE - 9)
     # Orbit from above the wall line so the camera never passes through a wall
     keys = [(0, *orbit_pose(tx, 21.5, tz, 200, 8, 8)), (7 * TPS, *orbit_pose(tx, 21.5, tz, 280, 7.5, 7.5))]
     elevator.shoot("C_aftermath", camera_path(keys), 7.3)
