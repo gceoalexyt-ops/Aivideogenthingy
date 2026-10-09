@@ -9,6 +9,7 @@ NoAI is used only to hold everyone still for the lineup, then released before th
 """
 import argparse
 import csv
+import json
 import os
 import re
 import sys
@@ -16,6 +17,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import elevator
+import shotlib
 from elevator import build_castle, set_gui
 from shotlib import (PLAYER, SERVER, Recorder, camera_path, cmd, define, reload, run, setup_camera, sleep, stop,
                      write_pack)
@@ -135,17 +137,7 @@ def calibrate(ns, runs, sprint_ticks=6000):
     return results
 
 
-def shoot(n, diamonds, castle=True):
-    arena()
-    cmd("difficulty normal", "time set 6000")
-    spawn(n, frozen=True)
-    sleep(2)
-
-    # A: lineup, camera glides from behind the golem ranks over to the Warden
-    keys = [(0, CX + 9, 29.5, AZ + SIZE - 3, 160, 26), (4 * TPS, CX + 4, 28, AZ + 26, 195, 30),
-            (9 * TPS + 10, CX - 1.5, 24.5, AZ + 19, 180, 8)]
-    elevator.shoot("A_lineup", camera_path(keys), 9.5)
-
+def setup_tracking():
     # B: the fight. Each tick the camera aims at the midpoint of the Warden (weight 2) and the golems within
     # 7 blocks of it, eases towards a spot 11 blocks south and 16 up, and is clamped inside the arena.
     from shotlib import FN
@@ -190,40 +182,42 @@ def shoot(n, diamonds, castle=True):
         f"scoreboard players set #fx cam {wx}", f"scoreboard players set #fz cam {wz}",
         f"scoreboard players set #cx cam {wx}", f"scoreboard players set #cz cam {wz + 1100}")
     reload()
-    cmd("data merge entity @e[tag=cam,limit=1] {teleport_duration:2}")
     sleep(1)
+
+def fight(n, name, timeout=None):
+    """Record one fight (camera tracking, telemetry). Returns (winner, golems_left, warden_hp, golem_health,
+    length_s, events). Clip times are in game seconds, matching the retimed video."""
+    slow = shotlib.SLOW
     rows, events = [], []
-    tele = os.path.join(OUT, "B_fight_telemetry.csv")
-    rec = Recorder(clip("B_fight"))
-    with rec:
-        rec_start = time.time()
+    tele = os.path.join(OUT, name + "_telemetry.csv")
+    with Recorder(clip(name)) as rec:
+        rec_start = rec.started
         run("track")
-        sleep(1.0)
+        sleep(1.0 * slow)
         release()
-        t_release = time.time() - rec_start
         prev_g, prev_hp, end_at = n, 500.0, None
         while True:
-            t_q = time.time() - rec_start
+            t_q = (time.time() - rec_start) / slow
             g, hp = state()
             if g is None or hp is None:
                 continue
             rows.append((round(t_q, 3), hp, g, state.golem_health))
             if g < prev_g:
-                for _ in range(prev_g - g):
-                    events.append((round(t_q, 3), "golem_death"))
+                events += [(round(t_q, 3), "golem_death")] * (prev_g - g)
             if hp == 0.0 and prev_hp > 0.0:
                 events.append((round(t_q, 3), "warden_death"))
             prev_g, prev_hp = g, hp
             if (g == 0 or hp == 0.0) and end_at is None:
-                end_at = time.time()
-            if end_at and time.time() - end_at > 3.0:
+                end_at = t_q
+            if end_at is not None and t_q - end_at > 3.0:
                 break
-            if time.time() - rec_start > 600:
+            if timeout and end_at is None and t_q > timeout + 1.0:
                 events.append((round(t_q, 3), "timeout"))
+                end_at = t_q
                 break
-            sleep(max(0.0, 0.25 - (time.time() - rec_start - t_q)))
+            sleep(0.25)
     stop()
-    winner = "golems" if prev_hp == 0.0 else ("warden" if prev_g == 0 else "unfinished")
+    winner = "golems" if prev_hp == 0.0 else ("warden" if prev_g == 0 else "draw")
     with open(tele, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["clip_time_s", "warden_health", "golems_alive", "golems_total_health", "event"])
@@ -232,26 +226,26 @@ def shoot(n, diamonds, castle=True):
             ev.setdefault(t, []).append(e)
         for t, hp, g, gh in rows:
             w.writerow([t, hp, g, "" if gh is None else gh, ";".join(ev.get(t, []))])
-    print(f"FIGHT: N={n} winner={winner} golems_left={prev_g} warden_hp={prev_hp} "
-          f"golems_total_health={rows[-1][3]} release_at={t_release:.2f}s length={rows[-1][0]:.1f}s", flush=True)
+    length = (end_at if end_at is not None else rows[-1][0]) - 1.0
+    return winner, prev_g, prev_hp, rows[-1][3], round(length, 1), events
 
-    # C: aftermath orbit of the winner(s)
-    target = "@e[type=warden,limit=1]" if winner == "warden" else "@e[type=iron_golem]"
-    pos = os.path.getsize(LOG)
-    cmd(f"execute as {target} run data get entity @s Pos")
-    sleep(0.8)
-    with open(LOG) as f:
-        f.seek(pos)
-        pts = re.findall(r"entity data: \[([-\d.]+)d, ([-\d.]+)d, ([-\d.]+)d\]", f.read())
-    if pts:
-        tx = sum(float(p[0]) for p in pts) / len(pts)
-        tz = sum(float(p[2]) for p in pts) / len(pts)
-    else:
-        tx, tz = CX, CZ
-    tx, tz = min(max(tx, AX + 9), AX + SIZE - 9), min(max(tz, AZ + 9), AZ + SIZE - 9)
-    # Orbit from above the wall line so the camera never passes through a wall
-    keys = [(0, *orbit_pose(tx, 21.5, tz, 200, 8, 8)), (7 * TPS, *orbit_pose(tx, 21.5, tz, 280, 7.5, 7.5))]
-    elevator.shoot("C_aftermath", camera_path(keys), 7.3)
+
+def shoot(n, diamonds, castle=True):
+    arena()
+    cmd("difficulty normal", "time set 6000")
+    spawn(n, frozen=True)
+    sleep(2)
+
+    # A: lineup, camera glides from behind the golem ranks over to the Warden
+    keys = [(0, CX + 9, 29.5, AZ + SIZE - 3, 160, 26), (4 * TPS, CX + 4, 28, AZ + 26, 195, 30),
+            (9 * TPS + 10, CX - 1.5, 24.5, AZ + 19, 180, 8)]
+    elevator.shoot("A_lineup", camera_path(keys), 9.5)
+
+    setup_tracking()
+    winner, g, hp, gh, length, events = fight(n, "B_fight")
+    print(f"FIGHT: N={n} winner={winner} golems_left={g} warden_hp={hp} golems_total_health={gh} "
+          f"length={length}s events={events}", flush=True)
+    aftermath("C_aftermath", winner)
 
     # D: castle with exactly `diamonds` blocks, sunset crane like the clutch castle
     if not castle:
@@ -262,7 +256,76 @@ def shoot(n, diamonds, castle=True):
     return winner
 
 
+def lineup(n, name):
+    """4-6 s standoff: from behind the golems (or the lone golem), looking at the Warden across the arena."""
+    keys = [(0, CX + 3, 26.5, AZ + 36, 175, 14), (5 * TPS, CX + 1, 23.6, AZ + 31.5, 180, 5)]
+    elevator.shoot(name, camera_path(keys), 5.3)
+
+
+def aftermath(name, winner):
+    target = "@e[type=warden,limit=1]" if winner == "warden" else "@e[type=iron_golem]"
+    pos = os.path.getsize(LOG)
+    cmd(f"execute as {target} run data get entity @s Pos")
+    sleep(0.8)
+    with open(LOG) as f:
+        f.seek(pos)
+        pts = re.findall(r"entity data: \[([-\d.]+)d, ([-\d.]+)d, ([-\d.]+)d\]", f.read())
+    tx = sum(float(p[0]) for p in pts) / len(pts) if pts else CX
+    tz = sum(float(p[2]) for p in pts) / len(pts) if pts else CZ
+    tx, tz = min(max(tx, AX + 9), AX + SIZE - 9), min(max(tz, AZ + 9), AZ + SIZE - 9)
+    keys = [(0, *orbit_pose(tx, 21.5, tz, 200, 8, 8)), (7 * TPS, *orbit_pose(tx, 21.5, tz, 280, 7.5, 7.5))]
+    elevator.shoot(name, camera_path(keys), 7.3)
+
+
+def rounds(ns, more, timeout=60):
+    """Escalating rounds; stop at the first round the golems win. Returns the list of round results."""
+    results, k, queue = [], 0, list(ns)
+    while queue:
+        n = queue.pop(0)
+        k += 1
+        arena()
+        cmd("difficulty normal", "time set 6000")
+        spawn(n, frozen=True)
+        sleep(2)
+        lineup(n, f"R{k}_lineup_{n}")
+        setup_tracking()
+        winner, g, hp, gh, length, events = fight(n, f"R{k}_fight_{n}", timeout=timeout)
+        r = dict(round=k, n=n, winner=winner, length_s=length, golems_left=g, warden_hp=hp, golems_health=gh,
+                 deaths=[t for t, e in events if e == "golem_death"],
+                 warden_death=[t for t, e in events if e == "warden_death"])
+        results.append(r)
+        print("ROUND", json.dumps(r), flush=True)
+        if winner == "golems":
+            aftermath("R_final_aftermath", winner)
+            break
+        if not queue:
+            queue = [n + more]
+    return results
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 2 and sys.argv[2] == "rounds":
+        ap = argparse.ArgumentParser()
+        ap.add_argument("out")
+        ap.add_argument("mode")
+        ap.add_argument("ns", nargs="+", type=int)
+        ap.add_argument("--step", type=int, default=2)
+        ap.add_argument("--slow", type=int, default=4)
+        ap.add_argument("--castle", type=int, default=0)
+        a = ap.parse_args()
+        OUT = elevator.OUT = a.out
+        os.makedirs(OUT, exist_ok=True)
+        shotlib.SLOW = a.slow
+        write_pack()
+        elevator.GUI_HIDDEN = False
+        set_gui(True)
+        res = rounds(a.ns, a.step)
+        json.dump(res, open(os.path.join(OUT, "rounds.json"), "w"), indent=1)
+        if a.castle:
+            import clutch
+            clutch.OUT = elevator.OUT
+            clutch.h_castle_named(a.castle, f"E_castle_{a.castle}", final_overhead=True, night=True)
+        sys.exit(0)
     if sys.argv[1] == "calibrate":
         ap = argparse.ArgumentParser()
         ap.add_argument("mode")
@@ -278,7 +341,9 @@ if __name__ == "__main__":
         ap.add_argument("n", type=int)
         ap.add_argument("--diamonds", type=int, default=187)
         ap.add_argument("--no-castle", action="store_true")
+        ap.add_argument("--slow", type=int, default=4)
         a = ap.parse_args()
+        shotlib.SLOW = a.slow
         OUT = elevator.OUT = a.out
         os.makedirs(OUT, exist_ok=True)
         write_pack()

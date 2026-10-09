@@ -10,6 +10,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import shotlib
 from shotlib import (PLAYER, SERVER, WIN, Recorder, camera_path, cmd, define, orbit, reload, run, setup_camera,
                      sleep, stop, write_pack, xdo)
 from shots import S, TPS, area, common, reset
@@ -35,7 +36,7 @@ def shoot(name, events, seconds, during=None):
         if during:
             during()
         else:
-            sleep(seconds)
+            sleep(seconds * shotlib.SLOW)
     stop()
 
 

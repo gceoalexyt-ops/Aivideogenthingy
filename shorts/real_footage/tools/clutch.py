@@ -216,10 +216,13 @@ def orbit_pose(cx, cy, cz, ang, r, h):
     return x, cy + h, z, yaw, math.degrees(math.atan2(h, r))
 
 
-def h_castle_named(n, name, final_overhead=False):
+def h_castle_named(n, name, final_overhead=False, night=False):
     x, z = 5300, 0
     build_castle(x, z, n, flat=True)  # one layer, so every diamond block can be counted from above
     cmd("time set 11900")  # the sun is setting in the west
+    if night:
+        light_castle(x, z)
+        cmd("time set 18000")  # midnight: lanterns light the diamonds
     cx, cz = x + 6.5, z + 6.5
     # Start low on the east side looking west into the sunset, circle round the south side while rising,
     # then crane up to nearly overhead so all the diamonds are in view at the end.
@@ -228,9 +231,28 @@ def h_castle_named(n, name, final_overhead=False):
     if final_overhead:
         # End lower and straight down over the pile, holding the last 3 s, so no tower is in frame
         keys = keys[:3] + [(15 * TPS, cx + 0.5, 36, cz, -90, 89), (18 * TPS, cx + 0.5, 35.5, cz, -90, 89.5)]
+    if night:
+        # Night look: start high above the gate with the moon behind, crane down to the pile
+        keys = [(0, cx, 52, cz + 30, 180, 32), (7 * TPS, cx, 42, cz + 16, 180, 50),
+                (13 * TPS, cx + 0.5, 37, cz + 3, -90, 80), (15 * TPS, cx + 0.5, 36, cz, -90, 89),
+                (18 * TPS, cx + 0.5, 35.5, cz, -90, 89.5)]
     set_gui(True)
     elevator.shoot(name, camera_path(keys), 18.6)
     cmd("time set 6000")
+
+
+def light_castle(x, z):
+    """Lanterns on the battlements and round the pile so the diamonds glow at night (no diamond is replaced)."""
+    c = [f"setblock {x + i} 28 {z} lantern" for i in range(0, 13, 2)]
+    c += [f"setblock {x + i} 28 {z + 12} lantern" for i in range(0, 13, 2)]
+    c += [f"setblock {x} 28 {z + i} lantern" for i in range(2, 11, 2)]
+    c += [f"setblock {x + 12} 28 {z + i} lantern" for i in range(2, 11, 2)]
+    for dx, dz in ((1, 1), (11, 1), (1, 11), (11, 11)):  # on the pile's bottom-layer corners, outside the 8x8
+        c.append(f"execute if block {x + dx} 22 {z + dz} air run setblock {x + dx} 22 {z + dz} lantern")
+    for i in range(2, 11, 2):  # lanterns along the inner foot of the walls
+        c += [f"execute if block {x + i} 21 {z + 1} air run setblock {x + i} 21 {z + 1} lantern",
+              f"execute if block {x + i} 21 {z + 11} air run setblock {x + i} 21 {z + 11} lantern"]
+    cmd(*c)
 
 
 def h_castle(n):
