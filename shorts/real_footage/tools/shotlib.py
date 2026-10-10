@@ -83,11 +83,17 @@ def orbit(cx, cy, cz, radius, height, yaw0, yaw1, ticks, pitch=None, start=0):
     return out
 
 
+# An invisible armor stand: the client interpolates its position every frame, so a spectator riding it
+# glides smoothly (an item_display camera stepped once per tick and looked shaky).
+CAM_ENTITY = "armor_stand"
+CAM_NBT = "Invisible:1b,Marker:1b,NoGravity:1b,Silent:1b,"
+
+
 def setup_camera(x, y, z, yaw, pitch):
     cmd("kill @e[tag=cam]",
         "gamemode spectator " + PLAYER,
         f"tp {PLAYER} {x} {y} {z} {yaw} {pitch}",
-        f"summon item_display {x} {y} {z} {{Tags:[\"cam\"],teleport_duration:1,Rotation:[{yaw}f,{pitch}f]}}")
+        f"summon {CAM_ENTITY} {x} {y} {z} {{Tags:[\"cam\"],{CAM_NBT}Rotation:[{yaw}f,{pitch}f]}}")
     sleep(0.5)
     cmd(f"spectate @e[tag=cam,limit=1] {PLAYER}")
 
@@ -115,20 +121,39 @@ def stop():
     cmd("scoreboard players set #on cam 0")
 
 
+SLOW = 1  # >1: record in slow motion (/tick rate 20/SLOW) and speed the video back up to real game speed
+
+
 class Recorder:
-    def __init__(self, path, fps=30):
+    """Record the X display. With SLOW > 1 the game runs at 1/SLOW speed while recording and the
+    clip is retimed to real game speed afterwards, so every output frame has SLOW times more rendering
+    and interpolation behind it (much smoother camera motion). Game logic is unchanged, only slower."""
+
+    def __init__(self, path, fps=30, slow=None):
         self.path, self.fps = path, fps
+        self.slow = SLOW if slow is None else slow
 
     def __enter__(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self.raw = self.path + ".raw.mp4" if self.slow > 1 else self.path
+        if self.slow > 1:
+            cmd(f"tick rate {20 / self.slow:g}")
+            time.sleep(0.4)
         self.p = subprocess.Popen(
             ["ffmpeg", "-loglevel", "error", "-y", "-f", "x11grab", "-draw_mouse", "0", "-framerate", str(self.fps),
-             "-video_size", "720x1280", "-i", DISPLAY, "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-             "-pix_fmt", "yuv420p", "-an", self.path], stdin=subprocess.PIPE)
+             "-video_size", "720x1280", "-i", DISPLAY, "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+             "-pix_fmt", "yuv420p", "-an", self.raw], stdin=subprocess.PIPE)
+        self.started = time.time()
         return self
 
     def __exit__(self, *a):
         self.p.communicate(b"q")
+        if self.slow > 1:
+            cmd("tick rate 20")
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", self.raw, "-vf",
+                            f"setpts=PTS/{self.slow},fps={self.fps}", "-c:v", "libx264", "-preset", "veryfast",
+                            "-crf", "16", "-pix_fmt", "yuv420p", "-an", self.path], check=True)
+            os.remove(self.raw)
 
 
 def record(path, seconds, before=None):
