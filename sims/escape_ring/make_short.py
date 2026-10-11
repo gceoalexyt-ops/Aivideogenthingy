@@ -8,7 +8,7 @@ the run ends when the ball actually gets out. `--search` tries starting conditio
 seeds whose escape lands in a good Short length; render picks the one given by SEED.
 
     python sims/escape_ring/make_short.py --search        # list good seeds
-    SEED=7 python sims/escape_ring/make_short.py           # -> sims/escape_ring/escape_ring_short.mp4
+    SEED=185 python sims/escape_ring/make_short.py           # -> sims/escape_ring/escape_ring_short.mp4
 """
 
 from __future__ import annotations
@@ -29,12 +29,12 @@ W, H, FPS, SR = 1080, 1920, 60, 44100
 SUB = 12  # physics substeps per frame
 CX, CY = W / 2, 1010
 R, TH = 430.0, 16.0  # ring radius and thickness (px)
-GAP = math.radians(30)  # gap width
-OMEGA = 1.15  # ring spin (rad/s)
-G = 2200.0  # gravity (px/s^2)
-R0, GROW = 20.0, 1.8  # starting ball radius, growth per bounce
-VMIN = 900.0  # bounces never leave the ball slower than this
-TAIL = 2.6  # seconds after the escape
+GAP = math.radians(28)  # gap width
+OMEGA = 2.2  # ring spin (rad/s)
+G = 3600.0  # gravity (px/s^2)
+R0, GROW = 20.0, 1.4  # starting ball radius, growth per bounce
+VMIN = 1700.0  # bounces never leave the ball slower than this
+TAIL = 1.6  # seconds after the escape
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 # In the Hall of the Mountain King, A minor (MIDI notes), one note per bounce
@@ -105,7 +105,7 @@ def simulate(seed, max_t=40.0):
 def search():
     for seed in range(400):
         frames, b, esc = simulate(seed)
-        if esc and 20 <= esc <= 30 and len(b) >= 30:
+        if esc and 11 <= esc <= 16 and len(b) >= 40:
             print(f"seed {seed}: escape at {esc:.1f}s after {len(b)} bounces, size x{(R0 + GROW * len(b)) / R0:.1f}")
 
 
@@ -299,4 +299,4 @@ if __name__ == "__main__":
     if "--search" in sys.argv:
         search()
     else:
-        render(int(os.environ.get("SEED", "58")))
+        render(int(os.environ.get("SEED", "185")))
