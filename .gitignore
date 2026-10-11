@@ -19,3 +19,4 @@ models/
 
 # Personal reference photos (faces) stay local
 private/
+__pycache__/
