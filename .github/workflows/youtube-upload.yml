@@ -1,0 +1,40 @@
+name: Post to YouTube
+
+# Uploads any Short with an upload.json that hasn't been posted yet (see tools/youtube/upload.py).
+on:
+  push:
+    paths:
+      - "sims/*/upload.json"
+      - "shorts/*/upload.json"
+  workflow_dispatch:
+
+concurrency:
+  group: youtube-upload
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Upload new Shorts
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: python tools/youtube/upload.py
+      - name: Record what was posted
+        if: always()
+        run: |
+          git add -A 'sims/*/posted.json' 'shorts/*/posted.json' 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Record posted YouTube Shorts"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
