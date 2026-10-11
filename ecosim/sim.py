@@ -45,6 +45,14 @@ class World:
     grass: np.ndarray = None
     mask: np.ndarray = None
     tick: int = 0
+    next_id: int = 0
+    catch_log: list = field(default_factory=list)  # this tick's catches: (fox id, rabbit id, position)
+    death_log: list = field(default_factory=list)  # this tick's other deaths: (kind, id, cause, position)
+
+    def ids(self, n):
+        out = np.arange(self.next_id, self.next_id + n)
+        self.next_id += n
+        return out
 
 
 def _spawn(rng, n, energy, r=ISLAND_R * 0.85):
@@ -66,6 +74,13 @@ def _keep(a, m):
     return {k: v[m] for k, v in a.items()}
 
 
+def add_foxes(w: World, n: int, energy=1.2):
+    """Drop n foxes onto the island (used to add the predators after the rabbits have settled)."""
+    f = _spawn(w.rng, n, energy, r=ISLAND_R * 0.6)
+    f["id"] = w.ids(n)
+    w.fox = _cat(w.fox, f) if len(w.fox.get("pos", [])) else f
+
+
 def new_world(seed, rabbits=100, foxes=10, p: Params | None = None):
     rng = np.random.default_rng(seed)
     w = World(rng, p or Params())
@@ -74,7 +89,9 @@ def new_world(seed, rabbits=100, foxes=10, p: Params | None = None):
     w.mask = np.hypot(X, Y) < ISLAND_R
     w.grass = np.where(w.mask, rng.uniform(0.5, 1.0, (GRID, GRID)), 0.0)
     w.rab = _spawn(rng, rabbits, 1.0)
+    w.rab["id"] = w.ids(rabbits)
     w.fox = _spawn(rng, foxes, 1.2)
+    w.fox["id"] = w.ids(foxes)
     return w
 
 
@@ -96,6 +113,7 @@ def step(w: World):
     """Advance one tick. Returns (births_rabbit, births_fox, catches [positions])."""
     p, rng = w.p, w.rng
     R, F = w.rab, w.fox
+    w.catch_log, w.death_log = [], []
     nr, nf = len(R["pos"]), len(F["pos"])
     catches = []
 
@@ -131,6 +149,7 @@ def step(w: World):
                 eaten[ri] = True
                 F["energy"][fi] += p.fox_gain
                 catches.append(R["pos"][ri].copy())
+                w.catch_log.append((int(F["id"][fi]), int(R["id"][ri]), R["pos"][ri].copy()))
         R = _keep(R, ~eaten)
     else:
         _move(F["pos"], F["head"], p.fox_speed, rng)
@@ -153,6 +172,9 @@ def step(w: World):
     F["energy"] -= p.fox_burn
     R["age"] += 1
     F["age"] += 1
+    for kind, A, max_age in (("rabbit", R, p.rabbit_max_age), ("fox", F, p.fox_max_age)):
+        for i in np.nonzero((A["energy"] <= 0) | (A["age"] >= max_age))[0]:
+            w.death_log.append((kind, int(A["id"][i]), "starved" if A["energy"][i] <= 0 else "old age", A["pos"][i].copy()))
     R = _keep(R, (R["energy"] > 0) & (R["age"] < p.rabbit_max_age))
     F = _keep(F, (F["energy"] > 0) & (F["age"] < p.fox_max_age))
 
@@ -166,6 +188,7 @@ def step(w: World):
         kid["pos"] += rng.normal(0, 6, kid["pos"].shape)
         kid["head"] = rng.uniform(0, 2 * math.pi, m.sum())
         kid["age"][:] = 0
+        kid["id"] = w.ids(int(m.sum()))
         return _cat(A, kid), int(m.sum())
 
     R, br = breed(R, p.rabbit_breed)
